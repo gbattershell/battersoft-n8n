@@ -599,7 +599,7 @@ Each step includes the expected verification so an agent can confirm success bef
 
 8. **Initialize SQLite database**
    - Run all `CREATE TABLE` statements from Section 8
-   - Verify: `sqlite3 ${DB_PATH} ".tables"` lists all 8 tables
+   - Verify: `sqlite3 ${DB_PATH} ".tables"` lists all 7 tables
 
 9. **Build core library**
    - Implement all five files in `scripts/core/`
