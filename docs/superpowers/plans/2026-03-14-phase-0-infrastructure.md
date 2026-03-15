@@ -29,16 +29,17 @@ Issues flagged during code review that must be addressed in a future task. Imple
 - **[Task 8] Error detail truncated to 40 chars in `❌` report line**: May silently cut off useful error context mid-word.
 - **[Task 8] No JSDoc on exported functions in status.js**: `heartbeat`, `error`, `report` have no parameter/return type documentation.
 - **[Task 9] `claude.js` error message statically lists models**: "Use 'haiku' or 'sonnet'" is hardcoded — won't update automatically if a model is added to `MODEL_IDS`.
+- **[Task 10] `callback-handler.js` dynamic import path unsanitized**: `callbackModule` from DB is used directly in `import('../modules/${callbackModule}/index.js')`. Trusted source in practice, but a crafted row with `../` sequences could traverse outside `scripts/modules/`. Low risk for a personal tool; worth hardening in a future phase.
+- **[Task 10] `confirm-timeout.js` has no logger**: If `send()` throws during timeout notification, the error propagates silently to n8n's error handler with no structured log entry.
 
 ### Addressed inline (not a future task)
 
 - **`query`/`queryOne`/`run` require array params** (`scripts/core/db.js`): `better-sqlite3` accepts a single array for bind parameters. Passing a scalar silently misbinds. Added a warning comment directly above those functions in db.js. All callers must pass `['value']` not `'value'`. *(Documented in code — no future task needed.)*
 
-### To address in Task 13 (callback-handler)
+### ✅ Resolved in Task 10 (was: To address in Task 13)
 
-- **`requestConfirmation` DB failure is unlogged** (`scripts/core/telegram.js`): The synchronous `dbRun(...)` call inside `requestConfirmation` has no error handling. If it throws (schema mismatch, disk full), the exception propagates silently with no log entry. Wrap with try/catch and log via `logger.error` before re-throwing.
-
-- **`requestConfirmation` return value is undocumented** (`scripts/core/telegram.js`): The spec describes a Promise-based resolution (boolean), but the n8n callback design makes that impractical. The function currently returns `undefined`. Add a JSDoc comment explicitly stating: resolution is handled by the callback-handler workflow, not by awaiting this call.
+- **`requestConfirmation` DB failure is unlogged** — Fixed: wrapped `dbRun(...)` in try/catch with `logger.error` before re-throwing (`scripts/core/telegram.js`).
+- **`requestConfirmation` return value is undocumented** — Fixed: JSDoc comment added explaining `undefined` return and callback-handler resolution model (`scripts/core/telegram.js`).
 
 ---
 

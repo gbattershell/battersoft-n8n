@@ -1,7 +1,6 @@
 // scripts/modules/status/index.js
-import { report } from '../../core/status.js'
+import { report, heartbeat, error as statusError } from '../../core/status.js'
 import { send } from '../../core/telegram.js'
-import { heartbeat, error as statusError } from '../../core/status.js'
 
 export async function run(input) {
   try {
