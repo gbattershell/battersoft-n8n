@@ -25,6 +25,12 @@ All business logic is in scripts/. n8n workflows are thin trigger/error wrappers
 - core/claude.js — ask(prompt, model?, { module? }) for all Claude calls
 - core/logger.js — logger.info/warn/error for all logging
 
+## Deferred Issues — Required Practice
+If a code review or implementation uncovers an issue that will be addressed in a future task (not the current one):
+- Add it to the **"Carry-Forward Issues"** section of the active plan file immediately
+- Tag it with which task should fix it (e.g., "To address in Task 13")
+- Never leave a known issue only in conversation context — it will be lost
+
 ## Before Opening a PR
 - Export updated n8n workflows to workflows/ directory
 - Add entry to CHANGELOG.md

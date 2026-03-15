@@ -12,6 +12,18 @@
 
 ---
 
+## Carry-Forward Issues
+
+Issues flagged during code review that must be addressed in a future task. Implementers: read this section before starting your task.
+
+### To address in Task 13 (callback-handler)
+
+- **`requestConfirmation` DB failure is unlogged** (`scripts/core/telegram.js`): The synchronous `dbRun(...)` call inside `requestConfirmation` has no error handling. If it throws (schema mismatch, disk full), the exception propagates silently with no log entry. Wrap with try/catch and log via `logger.error` before re-throwing.
+
+- **`requestConfirmation` return value is undocumented** (`scripts/core/telegram.js`): The spec describes a Promise-based resolution (boolean), but the n8n callback design makes that impractical. The function currently returns `undefined`. Add a JSDoc comment explicitly stating: resolution is handled by the callback-handler workflow, not by awaiting this call.
+
+---
+
 ## File Map
 
 | File | Responsibility |
