@@ -18,10 +18,20 @@ async function call(method, body) {
   return res.json()
 }
 
+/**
+ * Send a message to the configured chat.
+ * Always uses parse_mode='HTML' — callers must HTML-escape any untrusted content
+ * (user input, API responses, file paths) before passing it here.
+ * Safe characters: use &amp; for &, &lt; for <, &gt; for >
+ */
 export async function send(text) {
   return call('sendMessage', { chat_id: CHAT_ID(), text, parse_mode: 'HTML' })
 }
 
+/**
+ * Send a reply to a specific message in the configured chat.
+ * Always uses parse_mode='HTML' — same escaping rules as send().
+ */
 export async function reply(messageId, text) {
   return call('sendMessage', {
     chat_id: CHAT_ID(),

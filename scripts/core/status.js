@@ -2,6 +2,7 @@
 import { getDb, query, queryOne } from './db.js'
 import { send } from './telegram.js'
 
+/** Records a successful run. Resets consecutive_errors and alert_sent_at. */
 export async function heartbeat(moduleName) {
   const now = Math.floor(Date.now() / 1000)
   getDb().prepare(`
@@ -16,6 +17,7 @@ export async function heartbeat(moduleName) {
   `).run(moduleName, now, now)
 }
 
+/** Records a failed run. Sends a Telegram alert after 3 consecutive failures (24h cooldown). */
 export async function error(moduleName, err) {
   const now = Math.floor(Date.now() / 1000)
   getDb().prepare(
@@ -48,6 +50,12 @@ export async function error(moduleName, err) {
   }
 }
 
+/**
+ * Returns a formatted status string for all registered modules.
+ * Note: error messages from err.message are interpolated as-is. If a module produces
+ * error messages containing HTML special characters (&, <, >), those lines may render
+ * incorrectly in Telegram's HTML parse mode.
+ */
 export async function report() {
   const rows = query('SELECT * FROM module_status ORDER BY module')
   const now = Math.floor(Date.now() / 1000)
@@ -57,7 +65,7 @@ export async function report() {
     if (row.run_count === 0) {
       icon = '⬜'; detail = 'never run'
     } else if (row.consecutive_errors > 0) {
-      icon = '❌'; detail = 'FAILED ' + age(now - row.last_run) + ' ago — ' + (row.last_error ?? '').slice(0, 40)
+      icon = '❌'; detail = `FAILED ${age(now - row.last_run)} ago — ${truncate(row.last_error ?? '', 80)}`
     } else if (row.error_count > 0) {
       icon = '⚠️'; detail = 'last run ' + age(now - row.last_run) + ' ago · ' + row.run_count + ' runs · ' + row.error_count + ' errors'
     } else {
@@ -72,6 +80,12 @@ export async function report() {
   })
   const header = '🤖 System Status — ' + date
   return lines.length ? header + '\n\n' + lines.join('\n') : header + '\n\nNo modules registered yet.'
+}
+
+function truncate(str, max) {
+  if (str.length <= max) return str
+  const cut = str.lastIndexOf(' ', max)
+  return (cut > 0 ? str.slice(0, cut) : str.slice(0, max)) + '…'
 }
 
 function age(seconds) {

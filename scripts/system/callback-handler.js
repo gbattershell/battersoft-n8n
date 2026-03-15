@@ -35,6 +35,12 @@ export async function handle(callbackQuery) {
   await answerCallbackQuery(callbackQueryId, 'Confirmed! Processing...')
 
   try {
+    // Validate callbackModule is a safe identifier before using in dynamic import path.
+    // callbackAction is a property key lookup (not a path), so prototype-chain properties
+    // are blocked by the `typeof === 'function'` guard below — no regex needed there.
+    if (!/^[a-z0-9-]+$/.test(callbackModule)) {
+      throw new Error(`Invalid callbackModule identifier: '${callbackModule}'`)
+    }
     const mod = await import(`../modules/${callbackModule}/index.js`)
     if (typeof mod[callbackAction] === 'function') {
       await mod[callbackAction](callbackParams)

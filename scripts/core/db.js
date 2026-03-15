@@ -13,15 +13,31 @@ export function getDb() {
   const dbPath = process.env.DB_PATH || ':memory:'
   _db = new Database(dbPath)
   _db.pragma('journal_mode = WAL')
-  const schema = readFileSync(join(__dirname, '../db/schema.sql'), 'utf8')
-  _db.exec(schema)
+  _db.pragma('foreign_keys = ON')
+  // Only exec schema if tables don't exist yet — avoids redundant DDL on warm file DBs.
+  // For :memory: DBs (tests), tables never pre-exist so schema always runs.
+  // Sentinel: module_status is the first table defined in schema.sql. If it exists,
+  // we assume all other tables do too. A partially-initialised DB would need manual
+  // re-initialisation via `npm run db:init` (which uses CREATE TABLE IF NOT EXISTS).
+  const tableExists = _db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='module_status'").get()
+  if (!tableExists) {
+    const schema = readFileSync(join(__dirname, '../db/schema.sql'), 'utf8')
+    _db.exec(schema)
+  }
   return _db
 }
 
-export function auditLog(module, action, metadata = {}) {
+export function closeDb() {
+  if (_db) {
+    _db.close()
+    _db = null
+  }
+}
+
+export function auditLog(module, action, metadata = {}, success = 1) {
   getDb().prepare(
-    'INSERT INTO audit_log (ts, module, action, detail, success) VALUES (?, ?, ?, ?, 1)'
-  ).run(Date.now(), module, action, JSON.stringify(metadata))
+    'INSERT INTO audit_log (ts, module, action, detail, success) VALUES (?, ?, ?, ?, ?)'
+  ).run(Date.now(), module, action, JSON.stringify(metadata), success)
 }
 
 export function getPreference(key) {

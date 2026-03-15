@@ -17,7 +17,7 @@ global.fetch = async (url, options) => {
   }
 }
 
-const { send, sendWithButtons, sendDigest, reply, requestConfirmation } = await import('../../scripts/core/telegram.js')
+const { send, sendWithButtons, sendDigest, reply, requestConfirmation, answerCallbackQuery } = await import('../../scripts/core/telegram.js')
 
 afterEach(() => { fetchCalls.length = 0 })
 
@@ -61,6 +61,15 @@ describe('telegram.js', () => {
     })
   })
 
+  describe('answerCallbackQuery', () => {
+    it('calls answerCallbackQuery with correct callback_query_id', async () => {
+      await answerCallbackQuery('cq-id-123', 'done')
+      assert.match(fetchCalls[0].url, /answerCallbackQuery/)
+      assert.equal(fetchCalls[0].body.callback_query_id, 'cq-id-123')
+      assert.equal(fetchCalls[0].body.text, 'done')
+    })
+  })
+
   describe('requestConfirmation', () => {
     it('stores row in pending_confirmations and sends buttons', async () => {
       const { queryOne } = await import('../../scripts/core/db.js')
@@ -78,6 +87,9 @@ describe('telegram.js', () => {
       const data = JSON.parse(row.data)
       assert.equal(data.callbackModule, 'gmail')
       assert.equal(data.callbackAction, 'deleteEmails')
+      // expires_at should be approximately now + 300 seconds
+      const nowSec = Math.floor(Date.now() / 1000)
+      assert.ok(row.expires_at >= nowSec + 299 && row.expires_at <= nowSec + 301)
       // Check Telegram message was sent with buttons
       const body = fetchCalls[0].body
       assert.match(body.text, /Delete 5 emails/)

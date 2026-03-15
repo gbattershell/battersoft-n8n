@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 // Use in-memory DB for all tests
 process.env.DB_PATH = ':memory:'
 
-const { getDb, auditLog, getPreference, setPreference, query, queryOne, run, checkBatchSize } = await import('../../scripts/core/db.js')
+const { getDb, closeDb, auditLog, getPreference, setPreference, query, queryOne, run, checkBatchSize } = await import('../../scripts/core/db.js')
 
 // Clean all tables before each test to prevent cross-test contamination
 beforeEach(() => {
@@ -14,6 +14,23 @@ beforeEach(() => {
 })
 
 describe('db.js', () => {
+  describe('closeDb', () => {
+    it('closes and resets the singleton so the next getDb() call re-initialises', () => {
+      const db1 = getDb()
+      closeDb()
+      // getDb() here re-opens the singleton — intentional, ensures subsequent tests
+      // share a live connection rather than hitting a closed-DB error.
+      const db2 = getDb()
+      assert.notEqual(db1, db2)
+    })
+
+    it('is a no-op when called on an already-closed or never-opened singleton', () => {
+      closeDb() // close whatever is open
+      assert.doesNotThrow(() => closeDb()) // second call must not throw
+      getDb() // re-open for subsequent tests
+    })
+  })
+
   describe('auditLog', () => {
     it('inserts a row into audit_log', () => {
       auditLog('test-module', 'test-action', { id: 1 })
@@ -27,6 +44,12 @@ describe('db.js', () => {
       auditLog('test-module', 'action2', { key: 'value' })
       const row = queryOne('SELECT detail FROM audit_log WHERE action = ?', ['action2'])
       assert.equal(JSON.parse(row.detail).key, 'value')
+    })
+
+    it('stores success=0 when explicitly passed', () => {
+      auditLog('test-module', 'failed-action', { id: 2 }, 0)
+      const row = queryOne('SELECT success FROM audit_log WHERE action = ?', ['failed-action'])
+      assert.equal(row.success, 0)
     })
   })
 
