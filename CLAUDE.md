@@ -26,9 +26,10 @@ All business logic is in scripts/. n8n workflows are thin trigger/error wrappers
 - core/logger.js — logger.info/warn/error for all logging
 
 ## Deferred Issues — Required Practice
-If a code review or implementation uncovers an issue that will be addressed in a future task (not the current one):
+If a code review or implementation uncovers any issue (Important OR Minor) that will not be fixed immediately:
 - Add it to the **"Carry-Forward Issues"** section of the active plan file immediately
-- Tag it with which task should fix it (e.g., "To address in Task 13")
+- Tag Important issues with which task should fix them (e.g., "To address in Task 13")
+- Tag Minor issues with severity "Minor" — these are reviewed collectively at the end of all tasks to decide yes/no on addressing each one
 - Never leave a known issue only in conversation context — it will be lost
 
 ## Before Opening a PR

@@ -16,6 +16,20 @@
 
 Issues flagged during code review that must be addressed in a future task. Implementers: read this section before starting your task.
 
+### Minor findings — review at end of all tasks (yes/no on addressing each)
+
+- **[Task 2] CHANGELOG.md example is thin**: Only one entry exists as a template. Future agents following it may produce sparse changelogs.
+- **[Task 4] No foreign key constraints**: Implicit relationships between tables (e.g. `audit_log.module` → `module_status.module`) are not enforced by SQLite FK constraints. Acceptable for a personal tool, but not obvious to future contributors.
+- **[Task 5] `getDb()` re-execs schema.sql on every cold start**: `CREATE TABLE IF NOT EXISTS` makes it idempotent, but it's a redundant filesystem read + DDL batch for already-initialized databases.
+- **[Task 5] No `closeDb()` export**: The `_db` singleton can't be reset in tests. Future tests needing to test connection-closed or schema re-init paths have no hook.
+- **[Task 5] `auditLog` hardcodes `success = 1`**: No way to record a failed action. Pre-execution audit entries are logged as success before the outcome is known.
+- **[Task 7] `answerCallbackQuery` has no test**: The spinner-dismiss call in the callback handler. If it breaks, users see a spinning Telegram button indefinitely.
+- **[Task 7] `requestConfirmation` test doesn't assert `expires_at`**: The 5-minute timeout field is never verified in tests — a regression could go undetected.
+- **[Task 7] `send`/`reply` HTML parse_mode undocumented for callers**: Both always use `parse_mode: 'HTML'`. Module authors passing raw user/API data with `<`, `>`, `&` could produce garbled or rejected messages. Not documented at the function level.
+- **[Task 8] Error detail truncated to 40 chars in `❌` report line**: May silently cut off useful error context mid-word.
+- **[Task 8] No JSDoc on exported functions in status.js**: `heartbeat`, `error`, `report` have no parameter/return type documentation.
+- **[Task 9] `claude.js` error message statically lists models**: "Use 'haiku' or 'sonnet'" is hardcoded — won't update automatically if a model is added to `MODEL_IDS`.
+
 ### Addressed inline (not a future task)
 
 - **`query`/`queryOne`/`run` require array params** (`scripts/core/db.js`): `better-sqlite3` accepts a single array for bind parameters. Passing a scalar silently misbinds. Added a warning comment directly above those functions in db.js. All callers must pass `['value']` not `'value'`. *(Documented in code — no future task needed.)*
