@@ -35,6 +35,8 @@ export function setPreference(key, value) {
   ).run(key, String(value))
 }
 
+// IMPORTANT: params must always be an array, e.g. query('SELECT ...', ['value']).
+// Passing a scalar (string, number) will silently misbind in better-sqlite3.
 export function query(sql, params = []) {
   return getDb().prepare(sql).all(params)
 }

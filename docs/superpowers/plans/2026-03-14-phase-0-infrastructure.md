@@ -16,6 +16,10 @@
 
 Issues flagged during code review that must be addressed in a future task. Implementers: read this section before starting your task.
 
+### Addressed inline (not a future task)
+
+- **`query`/`queryOne`/`run` require array params** (`scripts/core/db.js`): `better-sqlite3` accepts a single array for bind parameters. Passing a scalar silently misbinds. Added a warning comment directly above those functions in db.js. All callers must pass `['value']` not `'value'`. *(Documented in code — no future task needed.)*
+
 ### To address in Task 13 (callback-handler)
 
 - **`requestConfirmation` DB failure is unlogged** (`scripts/core/telegram.js`): The synchronous `dbRun(...)` call inside `requestConfirmation` has no error handling. If it throws (schema mismatch, disk full), the exception propagates silently with no log entry. Wrap with try/catch and log via `logger.error` before re-throwing.
