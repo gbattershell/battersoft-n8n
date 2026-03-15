@@ -59,4 +59,4 @@ A module = one Node.js directory (scripts/modules/<name>/) + one n8n workflow (w
 - Do not hardcode secrets
 - Do not write to the Tiller Google Sheet (read-only)
 - Do not open inbound ports or configure Telegram webhooks
-- Do not push directly to main — open a PR
+- Do not push directly to main — create a branch (`git checkout -b phase-N-name`) and open a PR for owner approval

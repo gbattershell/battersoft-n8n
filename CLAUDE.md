@@ -32,6 +32,12 @@ If a code review or implementation uncovers any issue (Important OR Minor) that 
 - Tag Minor issues with severity "Minor" — these are reviewed collectively at the end of all tasks to decide yes/no on addressing each one
 - Never leave a known issue only in conversation context — it will be lost
 
+## Branching and PRs
+- **Never push directly to `main` for new phases or features** — Phase 0 was an exception
+- Create a branch per phase or feature: `git checkout -b phase-1-gmail`
+- Open a PR when the work is ready for review — the owner must approve before merge
+- Commits within a branch are fine to push incrementally; only `main` is protected
+
 ## Before Opening a PR
 - Export updated n8n workflows to workflows/ directory
 - Add entry to CHANGELOG.md
