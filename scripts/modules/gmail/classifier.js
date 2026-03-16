@@ -60,7 +60,7 @@ export async function classify(emails) {
     } else if (label === 'order') {
       const age = emailAgeMs(email.date)
       if (age < MS_24H) {
-        actionable.push(email)       // recent order in digest
+        orders.push(email)           // recent order shown in digest under Orders section
       } else if (age >= MS_90D) {
         deletable.push(email)        // old order in deletion batch
       }

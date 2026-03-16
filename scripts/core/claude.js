@@ -7,7 +7,7 @@ const MODEL_IDS = {
   sonnet: 'claude-sonnet-4-6',
 }
 
-export async function ask(prompt, model = 'haiku', { module = 'unknown' } = {}) {
+export async function ask(prompt, model = 'haiku', { module = 'unknown', maxTokens = 1024 } = {}) {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error('ANTHROPIC_API_KEY is not set — this feature requires Claude. Set it in .env to enable AI features.')
   }
@@ -21,7 +21,7 @@ export async function ask(prompt, model = 'haiku', { module = 'unknown' } = {}) 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
   const message = await client.messages.create({
     model: modelId,
-    max_tokens: 1024,
+    max_tokens: maxTokens,
     messages: [{ role: 'user', content: prompt }],
   })
 

@@ -77,13 +77,14 @@ describe('classifier.js — rule-based pass', () => {
 })
 
 describe('classifier.js — order age logic', () => {
-  it('order < 24h is actionable', async () => {
+  it('order < 24h goes to orders array', async () => {
     const recent = new Date(Date.now() - 60 * 60 * 1000).toUTCString() // 1h ago
     mockAsk.mock.mockImplementationOnce(async () =>
       JSON.stringify([{ id: 'msg-1', label: 'order', reason: 'shipping' }])
     )
     const result = await classify([makeEmail({ id: 'msg-1', date: recent })])
-    assert.equal(result.actionable.length, 1)
+    assert.equal(result.orders.length, 1)
+    assert.equal(result.actionable.length, 0)
   })
 
   it('order 24h-90d is silently kept (not in any output list)', async () => {
