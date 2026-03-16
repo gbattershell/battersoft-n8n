@@ -57,6 +57,7 @@ A module = one Node.js directory (scripts/modules/<name>/) + one n8n workflow (w
 - Do not write Telegram send logic outside telegram.js
 - Do not put Claude prompts inline in index.js
 - Do not hardcode secrets
+- **Do not read `.env`** — it contains secrets. Reference `.env.example` for variable names and documentation
 - Do not write to the Tiller Google Sheet (read-only)
 - Do not open inbound ports or configure Telegram webhooks
 - Do not push directly to main — create a branch (`git checkout -b phase-N-name`) and open a PR for owner approval

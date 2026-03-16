@@ -45,6 +45,7 @@ If a code review or implementation uncovers any issue (Important OR Minor) that 
 - Confirm no secrets in code or logs
 
 ## Security Rules
+- **Never read `.env`** — it contains secrets. Reference `.env.example` for variable names and documentation
 - Google OAuth tokens: never log, never expose in error messages
 - Telegram: ALLOWED_CHAT_ID validated on every inbound message
 - CalDAV: app-specific password only, never Apple ID password

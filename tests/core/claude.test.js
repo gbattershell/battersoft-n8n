@@ -39,6 +39,19 @@ describe('claude.js', () => {
     assert.match(result, /claude-sonnet-4-6/)
   })
 
+  it('throws when ANTHROPIC_API_KEY is not set', async () => {
+    const saved = process.env.ANTHROPIC_API_KEY
+    delete process.env.ANTHROPIC_API_KEY
+    try {
+      await assert.rejects(
+        () => ask('hello'),
+        /ANTHROPIC_API_KEY/
+      )
+    } finally {
+      process.env.ANTHROPIC_API_KEY = saved
+    }
+  })
+
   it('throws on unknown model name', async () => {
     await assert.rejects(
       () => ask('test', 'gpt-4'),

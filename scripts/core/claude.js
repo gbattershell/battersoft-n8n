@@ -8,6 +8,9 @@ const MODEL_IDS = {
 }
 
 export async function ask(prompt, model = 'haiku', { module = 'unknown' } = {}) {
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new Error('ANTHROPIC_API_KEY is not set — this feature requires Claude. Set it in .env to enable AI features.')
+  }
   const modelId = MODEL_IDS[model]
   if (!modelId) throw new Error(`Unknown model: '${model}'. Use 'haiku' or 'sonnet'.`)
 
