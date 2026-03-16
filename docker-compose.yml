@@ -1,7 +1,8 @@
 services:
   n8n:
-    # Pin to a specific version — check hub.docker.com/r/n8nio/n8n/tags for latest stable
-    image: n8nio/n8n:2.11.4
+    # Build from local Dockerfile (extends n8nio/n8n:2.11.4 + installs our npm deps)
+    # Run `docker compose up --build` when package.json changes.
+    build: .
     restart: unless-stopped
     ports:
       # Bind to localhost only — never expose to LAN (spec Section 9)
