@@ -15,7 +15,9 @@ services:
       # Pass secrets to n8n container so Code nodes can read process.env
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - ALLOWED_CHAT_ID=${ALLOWED_CHAT_ID}
-      - DB_PATH=${DB_PATH}
+      # Container path — ./data is mounted at /home/node/data.
+      # The host .env DB_PATH is only used by scripts run directly on the host (e.g. db:init).
+      - DB_PATH=/home/node/data/agent.db
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       # Allow Code nodes to use our npm dependencies and Node builtins
       - NODE_FUNCTION_ALLOW_EXTERNAL=better-sqlite3,@anthropic-ai/sdk
