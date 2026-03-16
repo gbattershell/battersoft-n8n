@@ -141,10 +141,10 @@ export async function handleCallback(callbackQuery) {
     const row = queryOne('SELECT data FROM pending_confirmations WHERE action_id = ?', [batchId])
     if (!row) return
     const ids = JSON.parse(row.data)
-    dbRun('DELETE FROM pending_confirmations WHERE action_id = ?', [batchId])
-    auditLog('gmail', 'delete_batch_start', { count: ids.length, batchId })
+    auditLog('gmail', 'delete_batch_start', { count: ids.length, ids })
     const { succeeded, failed } = await trashEmails(ids)
     auditLog('gmail', 'delete_batch_complete', { succeeded, failed, batchId })
+    dbRun('DELETE FROM pending_confirmations WHERE action_id = ?', [batchId])
     await send(failed === 0
       ? `🗑 Trashed ${succeeded} email${succeeded !== 1 ? 's' : ''}`
       : `🗑 Trashed ${succeeded}, ${failed} failed — check logs`)

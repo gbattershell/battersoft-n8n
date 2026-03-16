@@ -186,4 +186,40 @@ describe('index.js — handleCallback', () => {
     assert.equal(mockTrashEmails.mock.calls.length, 1)
     assert.ok(getSendCalls().length > 0)
   })
+
+  it('gmail_delete_all logs audit entries and deletes confirmation row', async () => {
+    const batchId = '7777'
+    dbRun(
+      "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'gmail', 'test', ?, ?)",
+      [batchId, JSON.stringify(['msg1']), Math.floor(Date.now() / 1000) + 300]
+    )
+    mockTrashEmails.mock.mockImplementationOnce(async () => ({ succeeded: 1, failed: 0 }))
+    await handleCallback({ id: 'cq1', data: `gmail_delete_all_${batchId}` })
+    // Row should be deleted after trash
+    const row = getDb().prepare('SELECT * FROM pending_confirmations WHERE action_id = ?').get(batchId)
+    assert.equal(row, undefined)
+    // Audit log should have both entries
+    const logs = getDb().prepare("SELECT action FROM audit_log WHERE module = 'gmail' ORDER BY rowid").all()
+    assert.ok(logs.some(l => l.action === 'delete_batch_start'))
+    assert.ok(logs.some(l => l.action === 'delete_batch_complete'))
+  })
+
+  it('gmail_review sends per-email buttons and deletes confirmation row', async () => {
+    const batchId = '6666'
+    dbRun(
+      "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'gmail', 'test', ?, ?)",
+      [batchId, JSON.stringify(['msg-a', 'msg-b']), Math.floor(Date.now() / 1000) + 300]
+    )
+    await handleCallback({ id: 'cq1', data: `gmail_review_${batchId}` })
+    // Row should be deleted
+    const row = getDb().prepare('SELECT * FROM pending_confirmations WHERE action_id = ?').get(batchId)
+    assert.equal(row, undefined)
+    // Two messages sent with buttons
+    assert.ok(getSendCalls().length >= 2)
+  })
+
+  it('gmail_delete_all returns early when batchId not found', async () => {
+    await handleCallback({ id: 'cq1', data: 'gmail_delete_all_nonexistent' })
+    assert.equal(mockTrashEmails.mock.calls.length, 0)
+  })
 })
