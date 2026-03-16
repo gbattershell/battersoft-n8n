@@ -8,9 +8,8 @@ services:
       # Bind to localhost only — never expose to LAN (spec Section 9)
       - "127.0.0.1:${N8N_PORT:-5678}:5678"
     environment:
-      - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=admin
-      - N8N_BASIC_AUTH_PASSWORD=${N8N_BASIC_AUTH_PASSWORD}
+      # n8n 2.x uses built-in user management (set up via UI on first run).
+      # N8N_BASIC_AUTH_* was removed in n8n 1.0+.
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
       # Pass secrets to n8n container so Code nodes can read process.env
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
