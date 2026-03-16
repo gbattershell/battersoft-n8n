@@ -41,23 +41,12 @@ Format: [Keep a Changelog](https://keepachangelog.com) — Added / Changed / Fix
 - Standalone Node.js bot service (`scripts/system/telegram-router-main.js` + `telegram-router.js`) running as a separate Docker service (`Dockerfile.bot`) — long-polls Telegram getUpdates, validates chat ID allowlist on every message, routes commands to modules, handles callback_query
 - Confirmation timeout cleanup runs every 60s via `setInterval` in the bot service entry point — purges expired `pending_confirmations` rows and notifies user
 - SQLite schema: 7 tables covering audit log, module status, error log, preferences, token usage, pending confirmations, and calendar mapping
-- `core/db.js` — SQLite wrapper with `auditLog`, `getPreference`/`setPreference`, `checkBatchSize`, and generic `query`/`queryOne`/`run` helpers; `closeDb()` exported for test isolation and graceful shutdown
+- `core/db.js` — SQLite wrapper with `auditLog`, `getPreference`/`setPreference`, `checkBatchSize`, and generic `query`/`queryOne`/`run` helpers; `closeDb()` exported for test isolation and graceful shutdown; `auditLog` accepts optional `success` param (default `1`) for recording failed actions
 - `core/logger.js` — structured stdout logging with ISO timestamp, level, module, and action fields
-- `core/telegram.js` — `send`, `reply`, `sendWithButtons`, `sendDigest`, `answerCallbackQuery`, `requestConfirmation`
-- `core/status.js` — per-module heartbeat/error tracking; sends Telegram alert after 3 consecutive failures with 24h cooldown
+- `core/telegram.js` — `send`, `reply`, `sendWithButtons`, `sendDigest`, `answerCallbackQuery`, `requestConfirmation`; `callbackModule` validated against `/^[a-z0-9-]+$/` before dynamic import
+- `core/status.js` — per-module heartbeat/error tracking; sends Telegram alert after 3 consecutive failures with 24h cooldown; error detail truncated at 80 chars with word-boundary
 - `core/claude.js` — Claude API wrapper supporting `haiku` and `sonnet` aliases; 30-day rolling token usage log; throws on missing `ANTHROPIC_API_KEY` so features degrade gracefully when key is absent
 - `status` Telegram command: per-module health icons (✅ healthy · ⚠️ past errors · ❌ currently failing · ⬜ never run)
-- Confirmation lifecycle: `requestConfirmation()` stores pending row → user taps inline button → callback handler dispatches to module; `callbackModule` validated against `/^[a-z0-9-]+$/` before dynamic import
+- Confirmation lifecycle: `requestConfirmation()` stores pending row → user taps inline button → callback handler dispatches to module; send failures in timeout cleanup caught and logged rather than propagating
 - `CLAUDE.md` — coding standards, core library API reference, security rules, and deferred-issue tracking policy for AI agents
 - `AGENTS.md` — step-by-step guide for building new modules with core library reference and destructive-action rules
-
-### Changed
-- `auditLog(module, action, metadata, success)` accepts optional `success` param (default `1`) — callers pass `0` to record a failed action
-- `getDb()` skips schema DDL if tables already exist — avoids redundant work on warm databases
-- Error detail in status report `❌` lines increased from 40 to 80 chars with word-boundary truncation
-- `confirm-timeout.js` send failures caught and logged via `logger.error` instead of propagating silently
-
-### Fixed
-- `answerCallbackQuery` now covered by tests — a regression would cause spinning Telegram buttons
-- `requestConfirmation` `expires_at` field now asserted in tests — 5-minute timeout was previously unverified
-- `send()` and `reply()` JSDoc explicitly documents HTML parse_mode escaping requirement for callers
