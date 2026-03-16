@@ -1,19 +1,22 @@
-FROM n8nio/n8n:2.11.4
-
-USER root
-
-# Install build tools to compile better-sqlite3 native module.
-# n8n 2.11.4 ships Node.js v24 which has no prebuilt better-sqlite3 binary.
+# Stage 1: compile native dependencies using a full Node.js image with build tools.
+# Must match the Node.js major version that n8n 2.11.4 ships (v24) so the
+# native module ABI version is identical in both stages.
+FROM node:24-bookworm-slim AS deps
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+COPY package.json package-lock.json ./
+RUN npm ci --production
 
-# Copy package.json to /home/node so that:
-#   1. Node.js finds "type":"module" when resolving scripts under /home/node/scripts/
-#   2. npm ci creates /home/node/node_modules/ with our dependencies
-COPY package.json package-lock.json /home/node/
+# Stage 2: add compiled deps to the n8n image — no package manager needed.
+FROM n8nio/n8n:2.11.4
+USER root
 
-# Install production dependencies into /home/node/node_modules/ — naturally on
-# Node.js's resolution path for any script under /home/node/ (e.g. scripts/**).
-RUN cd /home/node && npm ci --production
+# /home/node/node_modules/ is on Node.js's resolution path for scripts under
+# /home/node/ (which includes the mounted /home/node/scripts volume).
+COPY --from=deps /build/node_modules /home/node/node_modules
+
+# package.json at /home/node/ tells Node.js that .js files here are ES modules.
+COPY package.json /home/node/
 
 USER node
