@@ -6,6 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com) — Added / Changed / Fix
 ## [Unreleased]
 
 ### Changed
+- Architecture: replaced n8n Telegram Trigger (removed in n8n 2.x) with standalone Node.js long-polling bot service (`scripts/system/telegram-router.js`) running as a separate Docker service. n8n now handles scheduled tasks only.
 - `auditLog(module, action, metadata, success)` now accepts an optional `success` param (default `1`) — callers can pass `0` to record a failed action
 - `getDb()` skips schema DDL if tables already exist, avoiding redundant work on warm file databases
 - `closeDb()` exported from `core/db.js` — resets singleton for test isolation or graceful shutdown

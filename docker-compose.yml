@@ -27,5 +27,21 @@ services:
       - ./scripts:/home/node/scripts
       - ./data:/home/node/data
 
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - ALLOWED_CHAT_ID=${ALLOWED_CHAT_ID}
+      - DB_PATH=/home/node/data/agent.db
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    volumes:
+      - ./scripts:/home/node/scripts
+      - ./data:/home/node/data
+    depends_on:
+      - n8n
+
 volumes:
   n8n_data:

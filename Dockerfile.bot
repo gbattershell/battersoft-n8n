@@ -1,0 +1,21 @@
+# Stage 1: deps — install production dependencies
+FROM node:24-bookworm-slim AS deps
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    make \
+    g++ \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY package.json package-lock.json ./
+RUN npm ci --production
+
+# Stage 2: runtime
+FROM node:24-bookworm-slim
+
+WORKDIR /home/node
+COPY --from=deps /build/node_modules ./node_modules
+COPY package.json ./
+
+CMD ["node", "scripts/system/telegram-router.js"]
