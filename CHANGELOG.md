@@ -6,13 +6,13 @@ Format: [Keep a Changelog](https://keepachangelog.com) — Added / Changed / Fix
 ## [Unreleased]
 
 ### Added
-<!-- New features, new modules, new workflows, new commands, new env vars.
-     One bullet per meaningful change — not one bullet per phase or per file.
-     Be specific enough that someone can understand what changed without reading the diff.
-     Examples:
-     - Gmail module with daily digest and Claude-powered email classification (haiku)
-     - `cal next week` Telegram command showing 7-day calendar view with emoji per calendar
-     - New env var: DIGEST_TIME (24h format, default "07:30") controls morning briefing delivery -->
+- Gmail module: daily digest at 7:30 AM and on-demand `gmail` Telegram command — surfaces actionable emails and recent orders with Claude haiku classification fallback
+- Gmail module: 5 PM deletion batch — identifies promotions, social notifications, and orders >90 days; presents [Delete All] / [Review] / [Skip Today] prompt
+- `core/db.js`: `setSecret(key, value)` / `getSecret(key)` — AES-256-GCM encrypted secret storage using `ENCRYPTION_KEY` env var
+- `scripts/system/http-server.js`: reusable HTTP server for n8n scheduled triggers; modules call `registerRoute()` to register endpoints at import time; listens on port 3000 (Docker internal only)
+- `scripts/modules/gmail/setup.js`: one-time OAuth CLI script to authorize Gmail and store refresh token encrypted in SQLite — run on host with `source .env && node scripts/modules/gmail/setup.js`
+- n8n workflows `workflows/modules/gmail-digest.json` (7:30 AM) and `workflows/modules/gmail-deletion.json` (5 PM)
+- New env vars: `ENCRYPTION_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
 
 ### Changed
 <!-- Changes to existing behavior, APIs, configuration, or defaults.
