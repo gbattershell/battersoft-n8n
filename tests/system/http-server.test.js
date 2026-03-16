@@ -46,4 +46,9 @@ describe('http-server.js', () => {
     const json = await res.json()
     assert.ok(json.error.includes('exploded'))
   })
+
+  it('ignores query string when matching routes', async () => {
+    const res = await fetch(`http://localhost:${port}/test-route?foo=bar`, { method: 'POST' })
+    assert.equal(res.status, 200)
+  })
 })

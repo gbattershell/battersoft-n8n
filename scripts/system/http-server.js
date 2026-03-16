@@ -13,7 +13,8 @@ export function registerRoute(method, path, handler) {
 
 export function startHttpServer(port) {
   const server = createServer(async (req, res) => {
-    const key = `${req.method} ${req.url}`
+    const { pathname } = new URL(req.url, 'http://localhost')
+    const key = `${req.method} ${pathname}`
     const handler = routes.get(key)
     if (!handler) {
       res.writeHead(404, { 'Content-Type': 'application/json' })
