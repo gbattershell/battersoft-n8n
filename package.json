@@ -2,13 +2,16 @@
   "name": "battersoft-n8n",
   "version": "0.1.0",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "test": "node --experimental-test-module-mocks --test tests/**/*.test.js",
     "db:init": "node scripts/db/init.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
-    "better-sqlite3": "^11.0.0"
+    "better-sqlite3": "^11.0.0",
+    "googleapis": "^171.4.0"
   }
 }
