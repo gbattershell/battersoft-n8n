@@ -125,3 +125,65 @@ describe('index.js — digest', () => {
     assert.equal(status.consecutive_errors, 0)
   })
 })
+
+describe('index.js — deletion batch', () => {
+  it('sends no message when no deletable emails exist', async () => {
+    mockListEmails.mock.mockImplementationOnce(async () => [])
+    mockClassify.mock.mockImplementationOnce(async () => ({ actionable: [], orders: [], deletable: [] }))
+    await run({ action: 'deletion' })
+    assert.equal(getSendCalls().length, 0)
+  })
+
+  it('sends deletion prompt with 3 buttons when deletable emails exist', async () => {
+    mockListEmails.mock.mockImplementationOnce(async () => [makeEmail()])
+    mockClassify.mock.mockImplementationOnce(async () => ({
+      actionable: [], orders: [],
+      deletable: [makeEmail(), makeEmail({ id: 'msg-2' })],
+    }))
+    await run({ action: 'deletion' })
+    const call = getSendCalls()[0]
+    const body = JSON.parse(call.arguments[1].body)
+    const buttons = body.reply_markup.inline_keyboard[0].map(b => b.text)
+    assert.ok(buttons.some(b => b.includes('Delete All')))
+    assert.ok(buttons.some(b => b.includes('Review')))
+    assert.ok(buttons.some(b => b.includes('Skip')))
+  })
+
+  it('stores message IDs in pending_confirmations', async () => {
+    mockListEmails.mock.mockImplementationOnce(async () => [makeEmail()])
+    mockClassify.mock.mockImplementationOnce(async () => ({
+      actionable: [], orders: [],
+      deletable: [makeEmail({ id: 'del-msg-1' })],
+    }))
+    await run({ action: 'deletion' })
+    const row = getDb().prepare("SELECT data FROM pending_confirmations WHERE module = 'gmail'").get()
+    assert.ok(row)
+    const ids = JSON.parse(row.data)
+    assert.ok(ids.includes('del-msg-1'))
+  })
+})
+
+describe('index.js — handleCallback', () => {
+  it('gmail_skip deletes the pending_confirmations row', async () => {
+    const batchId = '9999'
+    dbRun(
+      "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'gmail', 'test', ?, ?)",
+      [batchId, JSON.stringify(['msg1']), Math.floor(Date.now() / 1000) + 300]
+    )
+    await handleCallback({ id: 'cq1', data: `gmail_skip_${batchId}` })
+    const row = getDb().prepare('SELECT * FROM pending_confirmations WHERE action_id = ?').get(batchId)
+    assert.equal(row, undefined)
+  })
+
+  it('gmail_delete_all trashes emails and sends confirmation', async () => {
+    const batchId = '8888'
+    dbRun(
+      "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'gmail', 'test', ?, ?)",
+      [batchId, JSON.stringify(['msg1', 'msg2']), Math.floor(Date.now() / 1000) + 300]
+    )
+    mockTrashEmails.mock.mockImplementationOnce(async () => ({ succeeded: 2, failed: 0 }))
+    await handleCallback({ id: 'cq1', data: `gmail_delete_all_${batchId}` })
+    assert.equal(mockTrashEmails.mock.calls.length, 1)
+    assert.ok(getSendCalls().length > 0)
+  })
+})
