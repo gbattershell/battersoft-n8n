@@ -3,6 +3,15 @@ import Database from 'better-sqlite3'
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
+
+const CIPHER_ALGO = 'aes-256-gcm'
+
+function getEncryptionKey() {
+  const key = process.env.ENCRYPTION_KEY
+  if (!key) throw new Error('ENCRYPTION_KEY is not set')
+  return Buffer.from(key, 'hex')
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -69,4 +78,30 @@ export function checkBatchSize(items, cap = 50) {
   if (!Array.isArray(items)) throw new Error('checkBatchSize: items must be an array')
   if (items.length > cap) throw new Error(`Batch size ${items.length} exceeds cap of ${cap}`)
   return items.length > 20
+}
+
+export function setSecret(key, value) {
+  const iv = randomBytes(12)
+  const cipher = createCipheriv(CIPHER_ALGO, getEncryptionKey(), iv)
+  const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()])
+  const tag = cipher.getAuthTag()
+  const ciphertext = JSON.stringify({
+    iv: iv.toString('base64'),
+    tag: tag.toString('base64'),
+    data: encrypted.toString('base64'),
+  })
+  setPreference(key, ciphertext)
+}
+
+export function getSecret(key) {
+  const raw = getPreference(key)
+  if (!raw) return null
+  try {
+    const { iv, tag, data } = JSON.parse(raw)
+    const decipher = createDecipheriv(CIPHER_ALGO, getEncryptionKey(), Buffer.from(iv, 'base64'))
+    decipher.setAuthTag(Buffer.from(tag, 'base64'))
+    return decipher.update(Buffer.from(data, 'base64')) + decipher.final('utf8')
+  } catch {
+    return null
+  }
 }

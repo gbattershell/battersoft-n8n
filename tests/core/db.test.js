@@ -4,8 +4,9 @@ import assert from 'node:assert/strict'
 
 // Use in-memory DB for all tests
 process.env.DB_PATH = ':memory:'
+process.env.ENCRYPTION_KEY = 'a'.repeat(64) // 32 bytes as hex — test value only
 
-const { getDb, closeDb, auditLog, getPreference, setPreference, query, queryOne, run, checkBatchSize } = await import('../../scripts/core/db.js')
+const { getDb, closeDb, auditLog, getPreference, setPreference, query, queryOne, run, checkBatchSize, setSecret, getSecret } = await import('../../scripts/core/db.js')
 
 // Clean all tables before each test to prevent cross-test contamination
 beforeEach(() => {
@@ -100,6 +101,40 @@ describe('db.js', () => {
         () => checkBatchSize(new Array(11), 10),
         /exceeds cap of 10/
       )
+    })
+  })
+
+  describe('setSecret / getSecret', () => {
+    it('round-trips a secret value', () => {
+      setSecret('test-secret', 'my-value')
+      assert.equal(getSecret('test-secret'), 'my-value')
+    })
+
+    it('stored value is not plain text', () => {
+      setSecret('test-secret-2', 'plain-text-value')
+      const raw = getPreference('test-secret-2')
+      assert.ok(raw !== 'plain-text-value')
+      assert.ok(raw.includes('"iv"')) // stored as JSON ciphertext
+    })
+
+    it('overwrites previous secret on second call', () => {
+      setSecret('overwrite-secret', 'first')
+      setSecret('overwrite-secret', 'second')
+      assert.equal(getSecret('overwrite-secret'), 'second')
+    })
+
+    it('returns null for unknown key', () => {
+      assert.equal(getSecret('nonexistent-secret'), null)
+    })
+
+    it('throws if ENCRYPTION_KEY is not set', () => {
+      const saved = process.env.ENCRYPTION_KEY
+      delete process.env.ENCRYPTION_KEY
+      try {
+        assert.throws(() => setSecret('x', 'y'), /ENCRYPTION_KEY/)
+      } finally {
+        process.env.ENCRYPTION_KEY = saved
+      }
     })
   })
 })
