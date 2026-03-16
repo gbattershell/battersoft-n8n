@@ -1,11 +1,24 @@
 # AGENTS.md — Building a New Module
 
+## Architecture
+
+**Bot service** (`scripts/system/telegram-router-main.js`) handles all Telegram I/O:
+- Long-polls getUpdates and routes commands to modules
+- Handles callback_query (confirm/cancel buttons)
+- Runs confirm-timeout cleanup every 60s
+
+**n8n** handles scheduled triggers only (daily digest, weekly summary, etc.).
+n8n Code nodes cannot use `import()` — scheduled n8n workflows must call a
+local HTTP endpoint on the bot service, not run scripts directly.
+
 ## What a module is
-A module = one Node.js directory (scripts/modules/<name>/) + one n8n workflow (workflows/modules/<name>.json).
+A module = one Node.js directory (`scripts/modules/<name>/`).
+Telegram command modules need no n8n workflow — the bot service routes to them directly.
+Scheduled modules need an n8n Schedule Trigger workflow that calls the bot's HTTP endpoint.
 
 ## Step-by-step checklist
 
-1. Create scripts/modules/<name>/index.js:
+1. Create `scripts/modules/<name>/index.js`:
    ```js
    import { heartbeat, error as statusError } from '../../core/status.js'
    import { logger } from '../../core/logger.js'
@@ -20,20 +33,18 @@ A module = one Node.js directory (scripts/modules/<name>/) + one n8n workflow (w
    }
    ```
 
-2. Create scripts/modules/<name>/prompts.js with all Claude prompt strings.
+2. Create `scripts/modules/<name>/prompts.js` with all Claude prompt strings.
    Do not put prompt strings in index.js.
 
-3. Build the n8n workflow (thin: trigger → validate → execute → error branch).
-   Export as workflows/modules/<name>.json.
+3. **If the module responds to a Telegram command:** add a route in
+   `scripts/system/telegram-router.js` `handleUpdate()` following the existing
+   pattern (text match → dynamic import → run).
 
-4. If the module responds to a Telegram command, add a Switch node case to
-   workflows/_router.json. Two condition forms:
-   - Prefix match: `{{ $json.text.startsWith('PREFIX') }}`
-   - Exact match:  `{{ $json.text === 'COMMAND' }}`
-   See design spec Section 6 for the full routing table and Switch node setup.
-   Wire output to Execute Workflow node for your module.
+4. **If the module runs on a schedule:** add an n8n Schedule Trigger workflow
+   that calls `http://bot:3000/<name>` (the bot service HTTP endpoint).
+   Export as `workflows/modules/<name>.json`.
 
-5. Add new env vars to .env.example (comment above each var, no value set).
+5. Add new env vars to `.env.example` (with `export`, comment above each var).
 
 6. Add a CHANGELOG.md entry (see CHANGELOG.md for format).
 

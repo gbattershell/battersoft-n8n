@@ -1,15 +1,20 @@
 # CLAUDE.md — battersoft-n8n
 
 ## Project Overview
-n8n-based personal automation suite. Self-hosted on WSL2 with Docker.
+Personal automation suite. Self-hosted on WSL2 with Docker.
 Telegram bot is the primary interface. Claude API handles all AI reasoning.
-All business logic is in scripts/. n8n workflows are thin trigger/error wrappers.
+All business logic is in scripts/. A standalone Node.js bot service handles
+Telegram polling and routing. n8n handles scheduled triggers only.
 
 ## Stack
-- n8n workflows (JSON in /workflows/)
 - Node.js ES modules for all logic (/scripts/)
+- Standalone bot service (scripts/system/telegram-router-main.js) — Telegram
+  long-polling, command routing, callback handling, confirmation cleanup
+- n8n (Docker) — scheduled triggers only (daily digest, weekly summary, etc.)
+  n8n Code nodes cannot use dynamic import(); scheduled workflows call a local
+  HTTP endpoint on the bot service instead of running scripts directly
 - SQLite for local state (/data/agent.db)
-- Docker Compose — port bound to 127.0.0.1 only
+- Docker Compose — ports bound to 127.0.0.1 only
 
 ## Coding Standards
 - All secrets via environment variables only — never hardcoded
