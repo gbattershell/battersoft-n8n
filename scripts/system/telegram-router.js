@@ -92,11 +92,4 @@ async function start() {
   }
 }
 
-// Only start the polling loop when this file is the process entry point.
-// When imported by tests, start() must not run.
-const isEntryPoint = process.argv[1] &&
-  (new URL(import.meta.url)).pathname === (new URL(`file://${process.argv[1]}`)).pathname
-
-if (isEntryPoint) {
-  start()
-}
+export { start }

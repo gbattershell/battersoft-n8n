@@ -18,4 +18,4 @@ WORKDIR /home/node
 COPY --from=deps /build/node_modules ./node_modules
 COPY package.json ./
 
-CMD ["node", "scripts/system/telegram-router.js"]
+CMD ["node", "scripts/system/telegram-router-main.js"]
