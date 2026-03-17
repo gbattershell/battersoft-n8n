@@ -2,7 +2,7 @@
 import { heartbeat, error as statusError } from '../../core/status.js'
 import { logger } from '../../core/logger.js'
 import { auditLog, run as dbRun, queryOne } from '../../core/db.js'
-import { send, sendWithButtons } from '../../core/telegram.js'
+import { send, sendWithButtons, answerCallbackQuery } from '../../core/telegram.js'
 import { registerRoute } from '../../system/http-server.js'
 import { listEmails, trashEmail, trashEmails } from './gmail-client.js'
 import { classify } from './classifier.js'
@@ -127,7 +127,9 @@ export async function run(input = {}) {
 }
 
 export async function handleCallback(callbackQuery) {
-  const { data } = callbackQuery
+  const { id: callbackQueryId, data } = callbackQuery
+  // Acknowledge the button press immediately to dismiss the loading spinner
+  await answerCallbackQuery(callbackQueryId, '')
 
   if (data.startsWith('gmail_skip_')) {
     const batchId = data.slice('gmail_skip_'.length)
