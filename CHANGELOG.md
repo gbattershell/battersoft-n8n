@@ -3,7 +3,37 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com) — Added / Changed / Fixed / Removed.
 
+<!-- AGENTS: The commented examples below are permanent reference — do NOT remove them.
+     They exist to guide future entries. Always add real entries above the example comments,
+     never replace or delete the comments themselves. -->
+
 ## [Unreleased]
+
+### Added
+<!-- New features or capabilities.
+     Examples:
+     - Gmail module: daily digest at 7:30 AM — surfaces actionable emails with Claude haiku fallback
+     - `core/db.js`: `setSecret` / `getSecret` — AES-256-GCM encrypted storage via ENCRYPTION_KEY -->
+
+### Changed
+<!-- Changes to existing behavior, APIs, configuration, or defaults.
+     Include what changed AND why — the why helps future agents understand intent.
+     Examples:
+     - `checkBatchSize` default cap raised from 50 to 100 (Gmail archives regularly exceed 50)
+     - Status report now shows last-run time in local timezone instead of UTC -->
+
+### Fixed
+<!-- Bug fixes. Describe what was broken, what the symptom was, and what the fix was.
+     Examples:
+     - Status report showed ⚠️ for modules that had never errored (off-by-one in error_count check)
+     - `send()` now HTML-escapes `&`, `<`, `>` in user strings to prevent Telegram parse errors -->
+
+### Removed
+<!-- Removed features, deleted files, dropped support, deprecated APIs.
+     If something was replaced by something else, name both.
+     Examples:
+     - Removed `scripts/core/legacy-router.js` (replaced by n8n Switch node routing)
+     - Dropped WEBHOOK_URL env var — polling-only per security spec, webhooks not supported -->
 
 ## [v0.2.0] — 2026-03-18
 
