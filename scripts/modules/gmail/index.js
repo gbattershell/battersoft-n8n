@@ -84,23 +84,27 @@ async function runDeletion() {
 
   if (deletable.length === 0) return
 
-  const batch = deletable.slice(0, 50)
+  const batch = deletable.slice(0, 10)
+  const remaining = deletable.length - batch.length
   const batchId = String(Date.now())
 
+  // Store full email objects so review flow has subject/sender/snippet
   dbRun(
     `INSERT INTO pending_confirmations (action_id, module, description, data, expires_at)
      VALUES (?, 'gmail', ?, ?, ?)
      ON CONFLICT(action_id) DO NOTHING`,
     [batchId, `Deletion batch of ${batch.length} email${batch.length !== 1 ? 's' : ''}`,
-     JSON.stringify(batch.map(e => e.id)),
+     JSON.stringify(batch),
      Math.floor(Date.now() / 1000) + 300]
   )
 
-  const lines = [`🗑 <b>Deletion suggestions</b> — ${batch.length} email${batch.length !== 1 ? 's' : ''}\n`]
-  batch.slice(0, 10).forEach((e, i) => {
+  const header = remaining > 0
+    ? `🗑 <b>Deletion suggestions</b> — ${batch.length} emails (${remaining} more after this batch)\n`
+    : `🗑 <b>Deletion suggestions</b> — ${batch.length} email${batch.length !== 1 ? 's' : ''}\n`
+  const lines = [header]
+  batch.forEach((e, i) => {
     lines.push(`${i + 1}. ${senderName(e.from)} — "${esc(e.subject)}" ${formatAge(e.date)}`)
   })
-  if (batch.length > 10) lines.push(`... and ${batch.length - 10} more`)
 
   await sendWithButtons(lines.join('\n'), [[
     { text: '🗑 Delete All', callback_data: `gmail_delete_all_${batchId}` },
@@ -142,7 +146,8 @@ export async function handleCallback(callbackQuery) {
     const batchId = data.slice('gmail_delete_all_'.length)
     const row = queryOne('SELECT data FROM pending_confirmations WHERE action_id = ?', [batchId])
     if (!row) return
-    const ids = JSON.parse(row.data)
+    const emails = JSON.parse(row.data)
+    const ids = emails.map(e => e.id)
     auditLog('gmail', 'delete_batch_start', { count: ids.length, ids })
     const { succeeded, failed } = await trashEmails(ids)
     auditLog('gmail', 'delete_batch_complete', { succeeded, failed, batchId })
@@ -150,6 +155,8 @@ export async function handleCallback(callbackQuery) {
     await send(failed === 0
       ? `🗑 Trashed ${succeeded} email${succeeded !== 1 ? 's' : ''}`
       : `🗑 Trashed ${succeeded}, ${failed} failed — check logs`)
+    // Show next batch if more remain
+    await runDeletion()
     return
   }
 
@@ -157,12 +164,17 @@ export async function handleCallback(callbackQuery) {
     const batchId = data.slice('gmail_review_'.length)
     const row = queryOne('SELECT data FROM pending_confirmations WHERE action_id = ?', [batchId])
     if (!row) return
-    const ids = JSON.parse(row.data)
+    const emails = JSON.parse(row.data)
     dbRun('DELETE FROM pending_confirmations WHERE action_id = ?', [batchId])
-    for (const id of ids) {
-      await sendWithButtons(`📧 Message: <code>${esc(id)}</code>`, [[
-        { text: '🗑 Trash', callback_data: `gmail_trash_${id}` },
-        { text: '✅ Keep',  callback_data: `gmail_keep_${id}` },
+    for (const e of emails) {
+      const lines = [
+        `📧 <b>${esc(e.subject)}</b>`,
+        `From: ${senderName(e.from)} ${formatAge(e.date)}`,
+        `<i>${esc(e.snippet)}</i>`,
+      ]
+      await sendWithButtons(lines.join('\n'), [[
+        { text: '🗑 Trash', callback_data: `gmail_trash_${e.id}` },
+        { text: '✅ Keep',  callback_data: `gmail_keep_${e.id}` },
       ]])
     }
     return
