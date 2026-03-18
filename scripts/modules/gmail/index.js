@@ -76,30 +76,37 @@ async function runDigest() {
   auditLog('gmail', 'digest', { actionable: actionable.length, orders: orders.length, deletable_count: deletable.length })
 }
 
-async function runDeletion() {
-  const rawEmails = await listEmails()
-  const { deletable } = rawEmails.length
-    ? await classify(rawEmails)
-    : { deletable: [] }
+// deletableEmails: pre-classified list to avoid re-fetching between batches.
+// On the first call (scheduled/on-demand) this is null and we fetch fresh.
+// On subsequent calls (skip/delete-all) we pass the remaining pre-fetched emails.
+async function runDeletion(deletableEmails = null) {
+  let allDeletable = deletableEmails
+  if (!allDeletable) {
+    const rawEmails = await listEmails()
+    const { deletable } = rawEmails.length
+      ? await classify(rawEmails)
+      : { deletable: [] }
+    allDeletable = deletable
+  }
 
-  if (deletable.length === 0) return
+  if (allDeletable.length === 0) return
 
-  const batch = deletable.slice(0, 10)
-  const remaining = deletable.length - batch.length
+  const batch = allDeletable.slice(0, 10)
+  const rest = allDeletable.slice(10) // remaining emails for subsequent batches
   const batchId = String(Date.now())
 
-  // Store full email objects so review flow has subject/sender/snippet
+  // Store ALL remaining emails so skip/delete-all can continue without re-fetching
   dbRun(
     `INSERT INTO pending_confirmations (action_id, module, description, data, expires_at)
      VALUES (?, 'gmail', ?, ?, ?)
      ON CONFLICT(action_id) DO NOTHING`,
     [batchId, `Deletion batch of ${batch.length} email${batch.length !== 1 ? 's' : ''}`,
-     JSON.stringify(batch),
+     JSON.stringify(allDeletable),
      Math.floor(Date.now() / 1000) + 300]
   )
 
-  const header = remaining > 0
-    ? `🗑 <b>Deletion suggestions</b> — ${batch.length} emails (${remaining} more after this batch)\n`
+  const header = rest.length > 0
+    ? `🗑 <b>Deletion suggestions</b> — ${batch.length} emails (${rest.length} more after this batch)\n`
     : `🗑 <b>Deletion suggestions</b> — ${batch.length} email${batch.length !== 1 ? 's' : ''}\n`
   const lines = [header]
   batch.forEach((e, i) => {
@@ -107,9 +114,9 @@ async function runDeletion() {
   })
 
   await sendWithButtons(lines.join('\n'), [[
-    { text: '🗑 Delete All',                      callback_data: `gmail_delete_all_${batchId}` },
-    { text: '👀 Review',                           callback_data: `gmail_review_${batchId}` },
-    { text: remaining > 0 ? '⏭ Skip Batch' : '⏭ Skip', callback_data: `gmail_skip_${batchId}` },
+    { text: '🗑 Delete All',                         callback_data: `gmail_delete_all_${batchId}` },
+    { text: '👀 Review',                              callback_data: `gmail_review_${batchId}` },
+    { text: rest.length > 0 ? '⏭ Skip Batch' : '⏭ Skip', callback_data: `gmail_skip_${batchId}` },
   ]])
 
   auditLog('gmail', 'deletion_prompt', { count: batch.length, batchId })
@@ -137,9 +144,11 @@ export async function handleCallback(callbackQuery) {
 
   if (data.startsWith('gmail_skip_')) {
     const batchId = data.slice('gmail_skip_'.length)
+    const row = queryOne('SELECT data FROM pending_confirmations WHERE action_id = ?', [batchId])
+    const rest = row ? JSON.parse(row.data).slice(10) : []
     dbRun('DELETE FROM pending_confirmations WHERE action_id = ?', [batchId])
     auditLog('gmail', 'deletion_skipped', { batchId })
-    await runDeletion() // show next batch if more remain, silent if none
+    await runDeletion(rest.length > 0 ? rest : null)
     return
   }
 
@@ -147,8 +156,10 @@ export async function handleCallback(callbackQuery) {
     const batchId = data.slice('gmail_delete_all_'.length)
     const row = queryOne('SELECT data FROM pending_confirmations WHERE action_id = ?', [batchId])
     if (!row) return
-    const emails = JSON.parse(row.data)
-    const ids = emails.map(e => e.id)
+    const allEmails = JSON.parse(row.data)
+    const batch = allEmails.slice(0, 10)
+    const rest = allEmails.slice(10)
+    const ids = batch.map(e => e.id)
     auditLog('gmail', 'delete_batch_start', { count: ids.length, ids })
     const { succeeded, failed } = await trashEmails(ids)
     auditLog('gmail', 'delete_batch_complete', { succeeded, failed, batchId })
@@ -156,8 +167,7 @@ export async function handleCallback(callbackQuery) {
     await send(failed === 0
       ? `🗑 Trashed ${succeeded} email${succeeded !== 1 ? 's' : ''}`
       : `🗑 Trashed ${succeeded}, ${failed} failed — check logs`)
-    // Show next batch if more remain
-    await runDeletion()
+    await runDeletion(rest.length > 0 ? rest : null)
     return
   }
 
@@ -165,9 +175,11 @@ export async function handleCallback(callbackQuery) {
     const batchId = data.slice('gmail_review_'.length)
     const row = queryOne('SELECT data FROM pending_confirmations WHERE action_id = ?', [batchId])
     if (!row) return
-    const emails = JSON.parse(row.data)
+    const allEmails = JSON.parse(row.data)
+    const batch = allEmails.slice(0, 10)
+    const rest = allEmails.slice(10)
     dbRun('DELETE FROM pending_confirmations WHERE action_id = ?', [batchId])
-    for (const e of emails) {
+    for (const e of batch) {
       const lines = [
         `📧 <b>${esc(e.subject)}</b>`,
         `From: ${senderName(e.from)} ${formatAge(e.date)}`,
@@ -178,6 +190,7 @@ export async function handleCallback(callbackQuery) {
         { text: '✅ Keep',  callback_data: `gmail_keep_${e.id}` },
       ]])
     }
+    if (rest.length > 0) await runDeletion(rest)
     return
   }
 
