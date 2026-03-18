@@ -5,9 +5,11 @@ Format: [Keep a Changelog](https://keepachangelog.com) — Added / Changed / Fix
 
 ## [Unreleased]
 
+## [v0.2.0] — 2026-03-18
+
 ### Added
-- Gmail module: daily digest at 7:30 AM and on-demand `gmail` Telegram command — surfaces actionable emails and recent orders with Claude haiku classification fallback
-- Gmail module: 5 PM deletion batch — identifies promotions, social notifications, and orders >90 days; presents [Delete All] / [Review] / [Skip Today] prompt
+- Gmail module: daily digest at 7:30 AM and on-demand via any Telegram message — surfaces actionable emails and recent orders with Claude haiku classification fallback
+- Gmail module: 5 PM deletion batch — identifies promotions, social notifications, and orders >90 days; presents batches of 10 with [Delete All] / [Review] / [Skip Batch] buttons; navigates pre-fetched batches without re-fetching from Gmail
 - `core/db.js`: `setSecret(key, value)` / `getSecret(key)` — AES-256-GCM encrypted secret storage using `ENCRYPTION_KEY` env var
 - `scripts/system/http-server.js`: reusable HTTP server for n8n scheduled triggers; modules call `registerRoute()` to register endpoints at import time; listens on port 3000 (Docker internal only)
 - `scripts/modules/gmail/setup.js`: one-time OAuth CLI script to authorize Gmail and store refresh token encrypted in SQLite — run on host with `source .env && node scripts/modules/gmail/setup.js`
@@ -15,24 +17,11 @@ Format: [Keep a Changelog](https://keepachangelog.com) — Added / Changed / Fix
 - New env vars: `ENCRYPTION_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
 
 ### Changed
-<!-- Changes to existing behavior, APIs, configuration, or defaults.
-     Include what changed AND why — the why helps future agents understand intent.
-     Examples:
-     - `checkBatchSize` default cap raised from 50 to 100 (Gmail archives regularly exceed 50)
-     - Status report now shows last-run time in local timezone instead of UTC -->
+- Default Telegram fallback (unrecognized message) now triggers Gmail digest instead of no-op
 
 ### Fixed
-<!-- Bug fixes. Describe what was broken, what the symptom was, and what the fix was.
-     Examples:
-     - Status report showed ⚠️ for modules that had never errored (off-by-one in error_count check)
-     - `send()` now HTML-escapes `&`, `<`, `>` in user strings to prevent Telegram parse errors -->
-
-### Removed
-<!-- Removed features, deleted files, dropped support, deprecated APIs.
-     If something was replaced by something else, name both.
-     Examples:
-     - Removed `scripts/core/legacy-router.js` (replaced by n8n Switch node routing)
-     - Dropped WEBHOOK_URL env var — polling-only per security spec, webhooks not supported -->
+- `core/claude.js`: `maxTokens` option was ignored — hardcoded 1024 overrode caller's value; now passed through correctly
+- Gmail classifier: recent orders (<24h) were routed to `actionable` instead of `orders` array
 
 ## [v0.1.0] — 2026-03-16
 
