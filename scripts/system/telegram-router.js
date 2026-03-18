@@ -41,7 +41,9 @@ export async function handleUpdate(update) {
     } else if (text.startsWith('news')) {
       // Phase 4: news
     } else {
-      // Phase 1: gmail
+      // Default fallback: any unrecognized message triggers gmail digest
+      const mod = await import('../modules/gmail/index.js')
+      await mod.run({ action: 'digest', message })
     }
   } else if (update.callback_query) {
     const callbackQuery = update.callback_query

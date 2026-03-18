@@ -3,16 +3,17 @@
 All notable changes to this project will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com) — Added / Changed / Fixed / Removed.
 
+<!-- AGENTS: The commented examples below are permanent reference — do NOT remove them.
+     They exist to guide future entries. Always add real entries above the example comments,
+     never replace or delete the comments themselves. -->
+
 ## [Unreleased]
 
 ### Added
-<!-- New features, new modules, new workflows, new commands, new env vars.
-     One bullet per meaningful change — not one bullet per phase or per file.
-     Be specific enough that someone can understand what changed without reading the diff.
+<!-- New features or capabilities.
      Examples:
-     - Gmail module with daily digest and Claude-powered email classification (haiku)
-     - `cal next week` Telegram command showing 7-day calendar view with emoji per calendar
-     - New env var: DIGEST_TIME (24h format, default "07:30") controls morning briefing delivery -->
+     - Gmail module: daily digest at 7:30 AM — surfaces actionable emails with Claude haiku fallback
+     - `core/db.js`: `setSecret` / `getSecret` — AES-256-GCM encrypted storage via ENCRYPTION_KEY -->
 
 ### Changed
 <!-- Changes to existing behavior, APIs, configuration, or defaults.
@@ -33,6 +34,24 @@ Format: [Keep a Changelog](https://keepachangelog.com) — Added / Changed / Fix
      Examples:
      - Removed `scripts/core/legacy-router.js` (replaced by n8n Switch node routing)
      - Dropped WEBHOOK_URL env var — polling-only per security spec, webhooks not supported -->
+
+## [v0.2.0] — 2026-03-18
+
+### Added
+- Gmail module: daily digest at 7:30 AM and on-demand via any Telegram message — surfaces actionable emails and recent orders with Claude haiku classification fallback
+- Gmail module: 5 PM deletion batch — identifies promotions, social notifications, and orders >90 days; presents batches of 10 with [Delete All] / [Review] / [Skip Batch] buttons; navigates pre-fetched batches without re-fetching from Gmail
+- `core/db.js`: `setSecret(key, value)` / `getSecret(key)` — AES-256-GCM encrypted secret storage using `ENCRYPTION_KEY` env var
+- `scripts/system/http-server.js`: reusable HTTP server for n8n scheduled triggers; modules call `registerRoute()` to register endpoints at import time; listens on port 3000 (Docker internal only)
+- `scripts/modules/gmail/setup.js`: one-time OAuth CLI script to authorize Gmail and store refresh token encrypted in SQLite — run on host with `source .env && node scripts/modules/gmail/setup.js`
+- n8n workflows `workflows/modules/gmail-digest.json` (7:30 AM) and `workflows/modules/gmail-deletion.json` (5 PM)
+- New env vars: `ENCRYPTION_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
+
+### Changed
+- Default Telegram fallback (unrecognized message) now triggers Gmail digest instead of no-op
+
+### Fixed
+- `core/claude.js`: `maxTokens` option was ignored — hardcoded 1024 overrode caller's value; now passed through correctly
+- Gmail classifier: recent orders (<24h) were routed to `actionable` instead of `orders` array
 
 ## [v0.1.0] — 2026-03-16
 

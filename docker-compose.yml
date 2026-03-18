@@ -37,6 +37,9 @@ services:
       - ALLOWED_CHAT_ID=${ALLOWED_CHAT_ID}
       - DB_PATH=/home/node/data/agent.db
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
     volumes:
       - ./scripts:/home/node/scripts
       - ./data:/home/node/data

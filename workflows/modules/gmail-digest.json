@@ -1,0 +1,58 @@
+{
+  "name": "Gmail Digest",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "30 7 * * *" }]
+        }
+      },
+      "id": "gmail-digest-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://bot:3000/gmail/digest",
+        "options": { "timeout": 5000 }
+      },
+      "id": "gmail-digest-request",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "chat_id", "value": "={{ $env.ALLOWED_CHAT_ID }}" },
+            { "name": "text", "value": "=⚠️ Gmail Digest workflow error: {{ $json.error?.message || 'unknown error' }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "gmail-digest-error-notify",
+      "name": "Telegram Error Notify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 460]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [[{ "node": "HTTP Request", "type": "main", "index": 0 }]]
+    },
+    "HTTP Request": {
+      "main": [[], [{ "node": "Telegram Error Notify", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}
