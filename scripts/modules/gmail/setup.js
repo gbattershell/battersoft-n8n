@@ -63,6 +63,7 @@ const server = createServer(async (req, res) => {
     }
     setSecret('gmail_refresh_token', tokens.refresh_token)
     console.log('Gmail authorized. Refresh token stored securely in SQLite.')
+    process.exit()
   } catch (err) {
     console.error('Failed to exchange authorization code:', err.message)
     process.exit(1)
