@@ -107,9 +107,9 @@ async function runDeletion() {
   })
 
   await sendWithButtons(lines.join('\n'), [[
-    { text: '🗑 Delete All', callback_data: `gmail_delete_all_${batchId}` },
-    { text: '👀 Review',     callback_data: `gmail_review_${batchId}` },
-    { text: '⏭ Skip Today', callback_data: `gmail_skip_${batchId}` },
+    { text: '🗑 Delete All',                      callback_data: `gmail_delete_all_${batchId}` },
+    { text: '👀 Review',                           callback_data: `gmail_review_${batchId}` },
+    { text: remaining > 0 ? '⏭ Skip Batch' : '⏭ Skip', callback_data: `gmail_skip_${batchId}` },
   ]])
 
   auditLog('gmail', 'deletion_prompt', { count: batch.length, batchId })
@@ -139,6 +139,7 @@ export async function handleCallback(callbackQuery) {
     const batchId = data.slice('gmail_skip_'.length)
     dbRun('DELETE FROM pending_confirmations WHERE action_id = ?', [batchId])
     auditLog('gmail', 'deletion_skipped', { batchId })
+    await runDeletion() // show next batch if more remain, silent if none
     return
   }
 
