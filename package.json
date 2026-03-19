@@ -12,6 +12,8 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "better-sqlite3": "^11.0.0",
-    "googleapis": "^171.4.0"
+    "googleapis": "^171.4.0",
+    "ical.js": "^2.1.0",
+    "tsdav": "^2.1.0"
   }
 }
