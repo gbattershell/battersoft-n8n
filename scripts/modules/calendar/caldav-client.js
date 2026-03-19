@@ -82,7 +82,7 @@ function parseVEvent(vevent, calendarUrl, tz) {
 }
 
 // Format a Date to 'YYYY-MM-DDTHH:mm:ss' in a given timezone
-function localISO(date, tz) {
+export function localISO(date, tz) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: tz,
     year: 'numeric', month: '2-digit', day: '2-digit',
@@ -146,7 +146,7 @@ function icalEscape(str) {
 }
 
 // Add minutes to a local ISO string ('YYYY-MM-DDTHH:mm:ss') without timezone confusion
-function addMinutesToLocalISO(localIso, minutes) {
+export function addMinutesToLocalISO(localIso, minutes) {
   const [datePart, timePart] = localIso.split('T')
   const [year, month, day] = datePart.split('-').map(Number)
   const [hour, minute, second] = timePart.split(':').map(Number)

@@ -15,6 +15,25 @@ const mockListCalendars = mock.fn(async () => [])
 const mockCreateEvent = mock.fn(async () => ({ uid: 'new-uid' }))
 const mockUpdateEvent = mock.fn(async () => {})
 const mockDeleteEvent = mock.fn(async () => {})
+function localISO(date, tz) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).formatToParts(date)
+  const p = Object.fromEntries(parts.map(x => [x.type, x.value]))
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}`
+}
+
+function addMinutesToLocalISO(localIso, minutes) {
+  const [datePart, timePart] = localIso.split('T')
+  const [year, month, day] = datePart.split('-').map(Number)
+  const [hour, minute, second] = timePart.split(':').map(Number)
+  const d = new Date(Date.UTC(year, month - 1, day, hour, minute, second))
+  d.setUTCMinutes(d.getUTCMinutes() + minutes)
+  const pad = n => String(n).padStart(2, '0')
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`
+}
+
 mock.module('../../../scripts/modules/calendar/caldav-client.js', {
   namedExports: {
     getEvents: mockGetEvents,
@@ -23,6 +42,8 @@ mock.module('../../../scripts/modules/calendar/caldav-client.js', {
     updateEvent: mockUpdateEvent,
     deleteEvent: mockDeleteEvent,
     clearClient: () => {},
+    localISO,
+    addMinutesToLocalISO,
   },
 })
 
@@ -517,5 +538,207 @@ describe('handleCallback', () => {
     const sends = getSendCalls()
     const body = JSON.stringify(sends.map(c => c.arguments[1]))
     assert.ok(body.includes('Cancelled'), 'expected "Cancelled" in message')
+  })
+})
+
+describe('edit-await flow', () => {
+  const existingEvent = {
+    calendarUrl: 'https://cal/home',
+    uid: 'uid1',
+    title: 'Dentist',
+    start: '2026-03-20T15:00:00',
+    duration: 60,
+    calendar: 'Garrett',
+  }
+  const exp = () => Math.floor(Date.now() / 1000) + 300
+
+  it('normal update: calls updateEvent, writes cal_undo row, sendWithButtons with Undo button, logs update_event', async () => {
+    mockParse.mock.mockImplementationOnce(async () => ({
+      intent: 'update',
+      confidence: 'high',
+      changes: { start: '2026-03-20T16:00:00' },
+    }))
+    mockGetEvents.mock.mockImplementation(async () => [])
+
+    dbRun(
+      "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+      ['cal_edit_await_tok1', 'Editing: Dentist', JSON.stringify(existingEvent), exp()]
+    )
+
+    await run({
+      message: { text: 'move to 4pm' },
+      editAwait: { action_id: 'cal_edit_await_tok1', data: JSON.stringify(existingEvent) },
+    })
+
+    // updateEvent called with correct args
+    assert.equal(mockUpdateEvent.mock.calls.length, 1, 'expected updateEvent to be called once')
+    assert.equal(mockUpdateEvent.mock.calls[0].arguments[0], 'https://cal/home')
+    assert.equal(mockUpdateEvent.mock.calls[0].arguments[1], 'uid1')
+    assert.deepEqual(mockUpdateEvent.mock.calls[0].arguments[2], { start: '2026-03-20T16:00:00' })
+
+    // cal_undo row written
+    const undoRows = query("SELECT action_id, data FROM pending_confirmations WHERE action_id LIKE 'cal_undo_%'")
+    assert.equal(undoRows.length, 1, 'expected one cal_undo_ row')
+    const undoPayload = JSON.parse(undoRows[0].data)
+    assert.equal(undoPayload.undoType, 'update', 'expected undoType to be "update"')
+
+    // sendWithButtons called with confirmation + Undo button
+    const sends = getSendCalls()
+    const body = JSON.stringify(sends.map(c => c.arguments[1]))
+    assert.ok(body.includes('Updated') || body.includes('✅'), 'expected confirmation in message')
+    assert.ok(body.includes('↩️ Undo') || body.includes('Undo'), 'expected Undo button')
+
+    // audit logged
+    const auditRows = query("SELECT * FROM audit_log WHERE module = 'calendar' AND action = 'update_event'")
+    assert.equal(auditRows.length, 1, 'expected one update_event audit log entry')
+
+    mockGetEvents.mock.mockImplementation(async () => [])
+  })
+
+  it('hard conflict on update: does NOT call updateEvent, writes cal_conflict_confirm row, sendWithButtons with Yes/Cancel', async () => {
+    mockParse.mock.mockImplementationOnce(async () => ({
+      intent: 'update',
+      confidence: 'high',
+      changes: { start: '2026-03-20T16:00:00' },
+    }))
+    // Overlapping event (different uid)
+    mockGetEvents.mock.mockImplementation(async () => [{
+      uid: 'other-uid',
+      title: 'Yoga',
+      start: '2026-03-20T15:30:00',
+      end: '2026-03-20T17:00:00',
+      allDay: false,
+      calendarUrl: 'https://cal/home',
+    }])
+
+    dbRun(
+      "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+      ['cal_edit_await_tok1', 'Editing: Dentist', JSON.stringify(existingEvent), exp()]
+    )
+
+    await run({
+      message: { text: 'move to 4pm' },
+      editAwait: { action_id: 'cal_edit_await_tok1', data: JSON.stringify(existingEvent) },
+    })
+
+    // updateEvent NOT called
+    assert.equal(mockUpdateEvent.mock.calls.length, 0, 'expected updateEvent NOT to be called on hard conflict')
+
+    // cal_conflict_confirm row written with actionType update
+    const conflictRows = query("SELECT action_id, data FROM pending_confirmations WHERE action_id LIKE 'cal_conflict_confirm_%'")
+    assert.equal(conflictRows.length, 1, 'expected one cal_conflict_confirm_ row')
+    const conflictPayload = JSON.parse(conflictRows[0].data)
+    assert.equal(conflictPayload.actionType, 'update', 'expected actionType to be "update"')
+
+    // sendWithButtons with conflict warning + Yes/Cancel
+    const sends = getSendCalls()
+    const body = JSON.stringify(sends.map(c => c.arguments[1]))
+    assert.ok(body.includes('✅ Yes') || body.includes('Yes'), 'expected Yes button in conflict warning')
+    assert.ok(body.includes('❌ Cancel') || body.includes('Cancel'), 'expected Cancel button in conflict warning')
+
+    mockGetEvents.mock.mockImplementation(async () => [])
+  })
+})
+
+describe('delete by text', () => {
+  const exp = () => Math.floor(Date.now() / 1000) + 300
+
+  it('single match: writes cal_confirm_delete row, sendWithButtons with delete confirmation and Yes/Cancel buttons', async () => {
+    mockParse.mock.mockImplementationOnce(async () => ({
+      intent: 'delete',
+      title: 'Dentist',
+      start: '2026-03-20T15:00:00',
+      confidence: 'high',
+    }))
+    // Return the event only for the first calendar URL (/cal/garrett/), empty for others
+    mockGetEvents.mock.mockImplementation(async (calUrl) => {
+      if (calUrl === '/cal/garrett/') {
+        return [{
+          uid: 'uid1',
+          title: 'Dentist',
+          start: '2026-03-20T15:00:00',
+          end: '2026-03-20T16:00:00',
+          allDay: false,
+          calendarUrl: calUrl,
+        }]
+      }
+      return []
+    })
+
+    await run({ message: { text: 'cal delete dentist friday' } })
+
+    // cal_confirm_delete row written
+    const confirmRows = query("SELECT action_id FROM pending_confirmations WHERE action_id LIKE 'cal_confirm_delete_%'")
+    assert.equal(confirmRows.length, 1, 'expected one cal_confirm_delete_ row')
+
+    // sendWithButtons with delete buttons
+    const sends = getSendCalls()
+    const body = JSON.stringify(sends.map(c => c.arguments[1]))
+    assert.ok(body.includes('Yes, Delete') || body.includes('🗑'), 'expected Yes Delete button in message')
+    assert.ok(body.includes('Cancel') || body.includes('❌'), 'expected Cancel button in message')
+
+    mockGetEvents.mock.mockImplementation(async () => [])
+  })
+
+  it('zero matches: send called with "Couldn\'t find" message', async () => {
+    mockParse.mock.mockImplementationOnce(async () => ({
+      intent: 'delete',
+      title: 'Dentist',
+      start: '2026-03-20T15:00:00',
+      confidence: 'high',
+    }))
+    // Default mockGetEvents is already [] from beforeEach reset
+
+    await run({ message: { text: 'cal delete dentist friday' } })
+
+    const sends = getSendCalls()
+    const body = JSON.stringify(sends.map(c => c.arguments[1]))
+    assert.ok(body.includes("Couldn") || body.includes("find"), 'expected "Couldn\'t find" in message')
+  })
+
+  it('multiple matches: sendWithButtons with multiple matches message + one Delete button per match, two cal_delete rows written', async () => {
+    mockParse.mock.mockImplementationOnce(async () => ({
+      intent: 'delete',
+      title: 'Dentist',
+      start: '2026-03-20T15:00:00',
+      confidence: 'high',
+    }))
+    // First calendar returns two matching events, second returns empty
+    mockGetEvents.mock.mockImplementation(async (calUrl) => {
+      if (calUrl === '/cal/garrett/') {
+        return [
+          {
+            uid: 'uid1',
+            title: 'Dentist',
+            start: '2026-03-20T15:00:00',
+            end: '2026-03-20T16:00:00',
+            allDay: false,
+            calendarUrl: calUrl,
+          },
+          {
+            uid: 'uid2',
+            title: 'Dentist checkup',
+            start: '2026-03-21T10:00:00',
+            end: '2026-03-21T11:00:00',
+            allDay: false,
+            calendarUrl: calUrl,
+          },
+        ]
+      }
+      return []
+    })
+
+    await run({ message: { text: 'cal delete dentist friday' } })
+
+    // Two cal_delete rows written
+    const deleteRows = query("SELECT action_id FROM pending_confirmations WHERE action_id LIKE 'cal_delete_%'")
+    assert.equal(deleteRows.length, 2, 'expected two cal_delete_ rows for multiple matches')
+
+    // sendWithButtons called with multiple matches message
+    const sends = getSendCalls()
+    const body = JSON.stringify(sends.map(c => c.arguments[1]))
+    assert.ok(body.includes('Multiple') || body.includes('matches'), 'expected multiple matches message')
+
+    mockGetEvents.mock.mockImplementation(async () => [])
   })
 })

@@ -4,7 +4,7 @@ import { heartbeat, error as statusError } from '../../core/status.js'
 import { logger } from '../../core/logger.js'
 import { auditLog, run as dbRun, query, queryOne, getPreference } from '../../core/db.js'
 import { send, sendWithButtons, answerCallbackQuery } from '../../core/telegram.js'
-import { getEvents, createEvent, updateEvent, deleteEvent, listCalendars } from './caldav-client.js'
+import { getEvents, createEvent, updateEvent, deleteEvent, listCalendars, localISO, addMinutesToLocalISO } from './caldav-client.js'
 import { parse } from './parser.js'
 import { registerRoute } from '../../system/http-server.js'
 
@@ -186,20 +186,6 @@ export async function run({ message, editAwait } = {}) {
   }
 }
 
-function localISO(date, tz) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
-  }).formatToParts(date)
-  const p = Object.fromEntries(parts.map(x => [x.type, x.value]))
-  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}`
-}
-
-function addMinutesToLocalISO(isoStr, minutes) {
-  // Parse isoStr as if it were UTC (safe for arithmetic purposes)
-  const ms = new Date(isoStr + 'Z').getTime() + minutes * 60_000
-  return new Date(ms).toISOString().slice(0, 19).replace('Z', '')
-}
 
 async function findConflicts(startIso, endIso, excludeUid) {
   const tz = getUserTimezone()
@@ -244,6 +230,10 @@ async function findConflicts(startIso, endIso, excludeUid) {
 
 async function runCreate(parsed) {
   const calendars = getCalendars()
+  if (calendars.length === 0) {
+    await send('No calendars set up. Run setup first.')
+    return
+  }
   const tz = getUserTimezone()
   const calRow = calendars.find(c => c.display_label === parsed.calendar) || calendars[0]
   const calendarUrl = calRow.caldav_id
@@ -317,11 +307,121 @@ async function runCreate(parsed) {
 }
 
 async function runDeleteByText(parsed) {
-  throw new Error('Not implemented')
+  const tz = getUserTimezone()
+  const calendars = getCalendars()
+
+  // Search all calendars ±3 days from parsed start
+  const centerDate = new Date(parsed.start + 'Z')  // treat as UTC for arithmetic
+  const searchStart = new Date(centerDate.getTime() - 3 * 86_400_000)
+  const searchEnd = new Date(centerDate.getTime() + 3 * 86_400_000)
+  const ssStr = localISO(searchStart, tz)
+  const seStr = localISO(searchEnd, tz)
+
+  const matches = []
+  const results = await Promise.all(calendars.map(cal => getEvents(cal.caldav_id, ssStr, seStr)))
+  for (let i = 0; i < calendars.length; i++) {
+    for (const evt of results[i]) {
+      if (evt.title.toLowerCase().includes((parsed.title || '').toLowerCase())) {
+        matches.push({ ...evt, calLabel: calendars[i].display_label })
+      }
+    }
+  }
+
+  if (matches.length === 0) {
+    await send("Couldn't find that event. Try <code>cal today</code> to see current events.")
+    return
+  }
+
+  if (matches.length > 1) {
+    const lines = ['Multiple matches found:']
+    const buttons = []
+    for (const m of matches) {
+      const t = token()
+      const payload = JSON.stringify({ calendarUrl: m.calendarUrl, uid: m.uid, title: m.title, start: m.start, calendar: m.calLabel })
+      dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+        [`cal_delete_${t}`, `Delete: ${m.title}`, payload, Math.floor(Date.now() / 1000) + 300])
+      lines.push(`• ${esc(m.title)} — ${formatDate(m.start, tz)} at ${formatTime(m.start, tz)} · ${esc(m.calLabel)}`)
+      buttons.push([{ text: `🗑 ${m.title}`, callback_data: `cal_delete_${t}` }])
+    }
+    await sendWithButtons(lines.join('\n'), buttons)
+    return
+  }
+
+  // Single match — go to confirm flow
+  const m = matches[0]
+  const ct = token()
+  const payload = JSON.stringify({ calendarUrl: m.calendarUrl, uid: m.uid, title: m.title, start: m.start, calendar: m.calLabel })
+  dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+    [`cal_confirm_delete_${ct}`, `Delete: ${m.title}`, payload, Math.floor(Date.now() / 1000) + 300])
+  await sendWithButtons(
+    `🗑 Delete ${esc(m.title)} on ${formatDate(m.start, tz)} at ${formatTime(m.start, tz)}?`,
+    [[
+      { text: '🗑 Yes, Delete', callback_data: `cal_confirm_delete_${ct}` },
+      { text: '❌ Cancel', callback_data: `cal_cancel_${ct}` },
+    ]]
+  )
 }
 
 async function handleEditDelta(text, existingEvent) {
-  throw new Error('Not implemented')
+  const tz = getUserTimezone()
+  const parsed = await parse(text, { existingEvent })
+
+  if (parsed.confidence === 'low' || parsed.intent !== 'update') {
+    await send("I couldn't understand that change. Try: \"move to 4pm\" or \"change to Tuesday\"")
+    return
+  }
+
+  // Merge changes onto existing event for conflict check
+  const merged = { ...existingEvent, ...parsed.changes }
+  const endDate = addMinutesToLocalISO(merged.start, merged.duration || existingEvent.duration)
+  const { hard, soft } = await findConflicts(merged.start, endDate, existingEvent.uid)
+
+  if (hard.length > 0) {
+    const t = token()
+    const payload = {
+      actionType: 'update',
+      calendarUrl: existingEvent.calendarUrl,
+      uid: existingEvent.uid,
+      changes: parsed.changes,
+      original: { title: existingEvent.title, start: existingEvent.start, duration: existingEvent.duration, calendar: existingEvent.calendar },
+    }
+    dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+      [`cal_conflict_confirm_${t}`, `Conflict: update ${existingEvent.title}`, JSON.stringify(payload), Math.floor(Date.now() / 1000) + 300])
+    const lines = hard.map(h => `⚠️ Conflict: overlaps ${esc(h.title)} (${formatTime(h.start, tz)}–${formatTime(h.end, tz)} · ${esc(h.calLabel)}).`)
+    lines.push('\nSave anyway?')
+    await sendWithButtons(lines.join('\n'), [[
+      { text: '✅ Yes', callback_data: `cal_conflict_confirm_${t}` },
+      { text: '❌ Cancel', callback_data: `cal_cancel_${t}` },
+    ]])
+    return
+  }
+
+  // Apply update (simple field changes only — calendar move not in spec for this task)
+  const calChanges = { ...parsed.changes }
+  delete calChanges.calendar
+  if (Object.keys(calChanges).length > 0) {
+    await updateEvent(existingEvent.calendarUrl, existingEvent.uid, calChanges)
+  }
+  const undoPayload = { undoType: 'update', calendarUrl: existingEvent.calendarUrl, uid: existingEvent.uid, original: { title: existingEvent.title, start: existingEvent.start, duration: existingEvent.duration, calendar: existingEvent.calendar } }
+
+  const ut = token()
+  dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+    [`cal_undo_${ut}`, `Undo: update ${existingEvent.title}`, JSON.stringify(undoPayload), Math.floor(Date.now() / 1000) + 300])
+
+  auditLog('calendar', 'update_event', { uid: existingEvent.uid, changes: parsed.changes })
+
+  const updated = { ...existingEvent, ...parsed.changes }
+  await sendWithButtons(
+    `✅ Updated: ${esc(updated.title)} — ${formatDate(updated.start, tz)}, ${formatTime(updated.start, tz)} (${updated.duration || existingEvent.duration}m) · ${esc(updated.calendar || existingEvent.calendar)}`,
+    [[{ text: '↩️ Undo', callback_data: `cal_undo_${ut}` }]]
+  )
+
+  if (soft.length > 0) {
+    const advisory = soft.map(s =>
+      `💡 Nearby: ${esc(s.title)} at ${formatTime(s.start, tz)} (${s.gapMin}min gap · ${esc(s.calLabel)}).`
+    ).join('\n')
+    await send(advisory)
+  }
 }
 
 export async function handleCallback(callbackQuery) {
