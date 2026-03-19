@@ -1741,6 +1741,7 @@ Push branch and create PR against `main`.
 
 - **Duplicate `localISO` and `addMinutesToLocalISO` helpers** (from Task 9): Both helpers exist in `caldav-client.js` (private, unexported) and were re-implemented in `index.js`. Fix: export from `caldav-client.js`, import in `index.js`, remove local copies. To address in Task 11.
 - **`runCreate` crashes on empty `calendar_mapping`** (from Task 9): `calendars[0]` is `undefined` when the table is empty — `calRow.caldav_id` throws. `runRead` guards against this with a `listCalendars()` retry; `runCreate`, `runDeleteByText`, and `handleEditDelta` need the same guard. To address in Task 11.
+- **`JSON.parse(row.data)` uncaught in `handleCallback`** (from Task 10): Malformed DB row throws synchronously, potentially crashing the bot callback. Either wrap per-handler in try/catch with logger.error + user message, or confirm `telegram-router-main.js` top-level catch handles it. To address in Task 12 (router review).
 
 ### Minor
 
@@ -1749,3 +1750,6 @@ Push branch and create PR against `main`.
 - **Unused `after` import in caldav-client.test.js** (from Task 4): `after` imported from `node:test` but never used. Remove in Task 13.
 - **`addMinutesToLocalISO` naive DST arithmetic** (from Task 4): Durations spanning a DST transition produce technically invalid DTEND times (e.g. `02:30` during spring-forward). iCloud handles this gracefully in practice. Acknowledge during PR review.
 - **`updateEvent`/`deleteEvent` fetches all calendar objects without time-range** (from Task 4): Fetches entire calendar to find one UID — slow on large calendars. No impact for personal use. Minor optimization for later.
+- **`calendar_move` branch in `cal_undo_` is dead code** (from Task 10): No upstream writer creates `undoType: 'calendar_move'` rows. Remove or wire up when calendar-move is implemented.
+- **Unknown `actionType` in `cal_conflict_confirm_` has no user feedback** (from Task 10): If `payload.actionType` is neither 'create' nor 'update', the handler silently does nothing. Add `logger.warn` + fallback message.
+- **Repeated `pending_confirmations` INSERT string** (from Task 10): Appears 7+ times in `handleCallback`. Consider `insertPending(actionId, description, data, ttlSec)` helper at PR prep if module grows further.
