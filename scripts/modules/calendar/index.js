@@ -186,9 +186,134 @@ export async function run({ message, editAwait } = {}) {
   }
 }
 
-// Stubs for Tasks 9-11
+function localISO(date, tz) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).formatToParts(date)
+  const p = Object.fromEntries(parts.map(x => [x.type, x.value]))
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}`
+}
+
+function addMinutesToLocalISO(isoStr, minutes) {
+  // Parse isoStr as if it were UTC (safe for arithmetic purposes)
+  const ms = new Date(isoStr + 'Z').getTime() + minutes * 60_000
+  return new Date(ms).toISOString().slice(0, 19).replace('Z', '')
+}
+
+async function findConflicts(startIso, endIso, excludeUid) {
+  const tz = getUserTimezone()
+  const calendars = getCalendars()
+  // Fetch events in a ±2 hour window for proximity check
+  const windowStartMs = new Date(startIso + 'Z').getTime() - 2 * 3600_000
+  const windowEndMs = new Date(endIso + 'Z').getTime() + 2 * 3600_000
+  const wsStr = localISO(new Date(windowStartMs), tz)
+  const weStr = localISO(new Date(windowEndMs), tz)
+
+  const results = await Promise.all(calendars.map(cal => getEvents(cal.caldav_id, wsStr, weStr)))
+  const allEvents = []
+  for (let i = 0; i < calendars.length; i++) {
+    for (const evt of results[i]) {
+      if (evt.allDay) continue
+      if (excludeUid && evt.uid === excludeUid) continue
+      allEvents.push({ ...evt, calLabel: calendars[i].display_label })
+    }
+  }
+
+  const evtStart = new Date(startIso + 'Z').getTime()
+  const evtEnd = new Date(endIso + 'Z').getTime()
+  const hard = []
+  const soft = []
+
+  for (const other of allEvents) {
+    const oStart = new Date(other.start + 'Z').getTime()
+    const oEnd = new Date(other.end + 'Z').getTime()
+    if (evtStart < oEnd && evtEnd > oStart) {
+      hard.push(other)
+      continue
+    }
+    const gap = Math.min(Math.abs(evtStart - oEnd), Math.abs(oStart - evtEnd))
+    const gapMin = Math.round(gap / 60_000)
+    if (gapMin <= 30) {
+      soft.push({ ...other, gapMin })
+    }
+  }
+
+  return { hard, soft }
+}
+
 async function runCreate(parsed) {
-  throw new Error('Not implemented')
+  const calendars = getCalendars()
+  const tz = getUserTimezone()
+  const calRow = calendars.find(c => c.display_label === parsed.calendar) || calendars[0]
+  const calendarUrl = calRow.caldav_id
+
+  const duration = parsed.duration || 60
+  const endIso = addMinutesToLocalISO(parsed.start, duration)
+  const { hard, soft } = await findConflicts(parsed.start, endIso, null)
+
+  if (hard.length > 0) {
+    const t = token()
+    const payload = JSON.stringify({
+      actionType: 'create',
+      calendarUrl,
+      event: { title: parsed.title, start: parsed.start, duration, calendar: parsed.calendar },
+    })
+    const exp = Math.floor(Date.now() / 1000) + 300
+    dbRun(
+      "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+      [`cal_conflict_confirm_${t}`, `Conflict confirm: ${parsed.title}`, payload, exp]
+    )
+
+    const lines = []
+    for (const h of hard) {
+      lines.push(`⚠️ Conflict: ${esc(parsed.title)} overlaps ${esc(h.title)} (${formatTime(h.start, tz)}–${formatTime(h.end, tz)} · ${esc(h.calLabel)}).`)
+    }
+    for (const s of soft) {
+      lines.push(`💡 Also nearby: ${esc(s.title)} at ${formatTime(s.start, tz)} (${s.gapMin}min gap · ${esc(s.calLabel)}). Heads up.`)
+    }
+    lines.push('\nSave anyway?')
+    await sendWithButtons(lines.join('\n'), [[
+      { text: '✅ Yes', callback_data: `cal_conflict_confirm_${t}` },
+      { text: '❌ Cancel', callback_data: `cal_cancel_${t}` },
+    ]])
+    return
+  }
+
+  // No hard conflict — create immediately
+  const { uid } = await createEvent(calendarUrl, { title: parsed.title, start: parsed.start, duration })
+
+  // Undo row
+  const ut = token()
+  const undoExp = Math.floor(Date.now() / 1000) + 300
+  dbRun(
+    "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+    [`cal_undo_${ut}`, `Undo create: ${parsed.title}`, JSON.stringify({ undoType: 'create', calendarUrl, uid }), undoExp]
+  )
+
+  auditLog('calendar', 'create_event', { title: parsed.title, calendar: parsed.calendar, start: parsed.start, duration })
+
+  const durationStr = `${duration}m`
+  const et = token()
+  const editPayload = JSON.stringify({ calendarUrl, uid, title: parsed.title, start: parsed.start, duration, calendar: parsed.calendar })
+  const editExp = Math.floor(Date.now() / 1000) + 300
+  dbRun(
+    "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+    [`cal_edit_${et}`, `Edit ${parsed.title}`, editPayload, editExp]
+  )
+
+  await sendWithButtons(
+    `✅ ${esc(parsed.title)} — ${formatDate(parsed.start, tz)}, ${formatTime(parsed.start, tz)} (${durationStr}) · ${esc(parsed.calendar)}`,
+    [[{ text: '✏️ Edit', callback_data: `cal_edit_${et}` }]]
+  )
+
+  // Soft conflict advisory
+  if (soft.length > 0) {
+    const advisory = soft.map(s =>
+      `💡 Also nearby: ${esc(s.title)} at ${formatTime(s.start, tz)} (${s.gapMin}min gap · ${esc(s.calLabel)}). Heads up.`
+    ).join('\n')
+    await send(advisory)
+  }
 }
 
 async function runDeleteByText(parsed) {

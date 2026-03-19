@@ -148,3 +148,144 @@ describe('run() — read flow', () => {
     assert.ok(rows.length > 0, 'expected heartbeat row in module_status')
   })
 })
+
+describe('create flow', () => {
+  it('normal create: calls createEvent, sends confirmation with Edit button, writes cal_undo and cal_edit rows, logs audit', async () => {
+    mockParse.mock.mockImplementationOnce(async () => ({
+      intent: 'create',
+      title: 'Dentist',
+      start: '2026-03-20T15:00:00',
+      duration: 60,
+      calendar: 'Garrett',
+      confidence: 'high',
+    }))
+    mockGetEvents.mock.mockImplementation(async () => [])
+
+    await run({ message: { text: 'cal add dentist Friday 3pm' } })
+
+    // createEvent called once
+    assert.equal(mockCreateEvent.mock.calls.length, 1, 'expected createEvent to be called once')
+
+    // confirmation message sent with Edit button
+    const sends = getSendCalls()
+    assert.ok(sends.length >= 1, 'expected at least one sendMessage call')
+    const body = JSON.stringify(sends.map(c => c.arguments[1]))
+    assert.ok(body.includes('Dentist'), 'expected title in confirmation message')
+    assert.ok(body.includes('✏️ Edit'), 'expected Edit button in confirmation message')
+
+    // cal_undo row written
+    const rows = query('SELECT action_id FROM pending_confirmations WHERE module = ?', ['calendar'])
+    const undoRows = rows.filter(r => r.action_id.startsWith('cal_undo_'))
+    assert.equal(undoRows.length, 1, 'expected one cal_undo_ row')
+
+    // cal_edit row written (from the create confirmation)
+    const editRows = rows.filter(r => r.action_id.startsWith('cal_edit_'))
+    assert.ok(editRows.length >= 1, 'expected at least one cal_edit_ row')
+
+    // audit logged
+    const auditRows = query("SELECT * FROM audit_log WHERE module = 'calendar' AND action = 'create_event'")
+    assert.equal(auditRows.length, 1, 'expected one create_event audit log entry')
+
+    mockGetEvents.mock.mockImplementation(async () => [])
+  })
+
+  it('hard conflict: does NOT call createEvent, sends conflict warning with Yes/Cancel buttons, writes cal_conflict_confirm row', async () => {
+    mockParse.mock.mockImplementationOnce(async () => ({
+      intent: 'create',
+      title: 'Dentist',
+      start: '2026-03-20T15:00:00',
+      duration: 60,
+      calendar: 'Garrett',
+      confidence: 'high',
+    }))
+    // Overlapping event: starts at 14:30, ends at 15:30 — overlaps with 15:00–16:00
+    mockGetEvents.mock.mockImplementation(async () => [{
+      uid: 'abc',
+      title: 'Yoga',
+      start: '2026-03-20T14:30:00',
+      end: '2026-03-20T15:30:00',
+      allDay: false,
+      calendarUrl: '/cal/garrett/',
+    }])
+
+    await run({ message: { text: 'cal add dentist Friday 3pm' } })
+
+    // createEvent NOT called
+    assert.equal(mockCreateEvent.mock.calls.length, 0, 'expected createEvent NOT to be called on hard conflict')
+
+    // conflict warning sent with Yes and Cancel buttons
+    const sends = getSendCalls()
+    assert.ok(sends.length >= 1, 'expected at least one sendMessage call')
+    const body = JSON.stringify(sends.map(c => c.arguments[1]))
+    assert.ok(body.includes('✅ Yes') || body.includes('Yes'), 'expected Yes button in conflict warning')
+    assert.ok(body.includes('❌ Cancel') || body.includes('Cancel'), 'expected Cancel button in conflict warning')
+
+    // cal_conflict_confirm row written
+    const rows = query('SELECT action_id FROM pending_confirmations WHERE module = ?', ['calendar'])
+    const conflictRows = rows.filter(r => r.action_id.startsWith('cal_conflict_confirm_'))
+    assert.equal(conflictRows.length, 1, 'expected one cal_conflict_confirm_ row')
+
+    mockGetEvents.mock.mockImplementation(async () => [])
+  })
+
+  it('soft conflict: calls createEvent, sends advisory follow-up message, no conflict warning', async () => {
+    mockParse.mock.mockImplementationOnce(async () => ({
+      intent: 'create',
+      title: 'Dentist',
+      start: '2026-03-20T15:00:00',
+      duration: 60,
+      calendar: 'Garrett',
+      confidence: 'high',
+    }))
+    // Event ends at 14:45 — 15 min before new event starts at 15:00 → soft conflict (gap ≤ 30 min)
+    mockGetEvents.mock.mockImplementation(async () => [{
+      uid: 'xyz',
+      title: 'Lunch',
+      start: '2026-03-20T13:45:00',
+      end: '2026-03-20T14:45:00',
+      allDay: false,
+      calendarUrl: '/cal/garrett/',
+    }])
+
+    await run({ message: { text: 'cal add dentist Friday 3pm' } })
+
+    // createEvent called
+    assert.equal(mockCreateEvent.mock.calls.length, 1, 'expected createEvent to be called for soft conflict')
+
+    // advisory sent (should be at least 2 sendMessage calls: confirmation + advisory)
+    const sends = getSendCalls()
+    assert.ok(sends.length >= 2, 'expected confirmation + advisory message (at least 2 sendMessage calls)')
+    const body = JSON.stringify(sends.map(c => c.arguments[1]))
+    assert.ok(body.includes('💡') || body.includes('nearby') || body.includes('Lunch'), 'expected advisory message about nearby event')
+
+    // no conflict warning row
+    const rows = query('SELECT action_id FROM pending_confirmations WHERE module = ?', ['calendar'])
+    const conflictRows = rows.filter(r => r.action_id.startsWith('cal_conflict_confirm_'))
+    assert.equal(conflictRows.length, 0, 'expected no cal_conflict_confirm_ row for soft conflict')
+
+    mockGetEvents.mock.mockImplementation(async () => [])
+  })
+
+  it('no conflict: calls createEvent, sends exactly one message, no advisory', async () => {
+    mockParse.mock.mockImplementationOnce(async () => ({
+      intent: 'create',
+      title: 'Dentist',
+      start: '2026-03-20T15:00:00',
+      duration: 60,
+      calendar: 'Garrett',
+      confidence: 'high',
+    }))
+    mockGetEvents.mock.mockImplementation(async () => [])
+
+    await run({ message: { text: 'cal add dentist Friday 3pm' } })
+
+    // createEvent called
+    assert.equal(mockCreateEvent.mock.calls.length, 1, 'expected createEvent to be called')
+
+    // only one sendMessage call (no advisory)
+    const sends = getSendCalls()
+    assert.equal(sends.length, 1, 'expected exactly one sendMessage call (no advisory)')
+
+    mockGetEvents.mock.mockImplementation(async () => [])
+  })
+})
