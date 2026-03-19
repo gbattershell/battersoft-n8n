@@ -1,0 +1,9 @@
+{
+  "name": "Calendar (placeholder)",
+  "nodes": [],
+  "connections": {},
+  "active": false,
+  "settings": {},
+  "tags": [],
+  "notes": "Placeholder for Phase 2 calendar module. The cal command is handled by the bot service. This workflow will be extended when scheduled calendar reminders are added."
+}
