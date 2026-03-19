@@ -210,6 +210,7 @@ export async function updateEvent(calendarUrl, uid, changes) {
     prop.setValue(ICAL.Time.fromDateTimeString(changes.start))
   }
   if (changes.duration !== undefined) {
+    // Read dtstart AFTER any changes.start mutation so we use the updated start time
     const dtstart = vevent.getFirstPropertyValue('dtstart')
     const startJs = dtstart.toJSDate()
     const endJs = new Date(startJs.getTime() + changes.duration * 60_000)
