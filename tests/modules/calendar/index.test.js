@@ -37,7 +37,7 @@ mock.module('../../../scripts/system/http-server.js', {
 })
 
 const { run, handleCallback } = await import('../../../scripts/modules/calendar/index.js')
-const { getDb, run: dbRun, query, setPreference } = await import('../../../scripts/core/db.js')
+const { getDb, run: dbRun, query, queryOne, setPreference } = await import('../../../scripts/core/db.js')
 
 function getSendCalls() {
   return fetchMock.mock.calls.filter(c => String(c.arguments[0]).includes('sendMessage'))
@@ -287,5 +287,235 @@ describe('create flow', () => {
     assert.equal(sends.length, 1, 'expected exactly one sendMessage call (no advisory)')
 
     mockGetEvents.mock.mockImplementation(async () => [])
+  })
+})
+
+describe('handleCallback', () => {
+  const eventData = JSON.stringify({
+    calendarUrl: 'https://cal/home',
+    uid: 'uid1',
+    title: 'Dentist',
+    start: '2026-03-20T15:00:00',
+    duration: 60,
+    calendar: 'Garrett',
+  })
+  const exp = () => Math.floor(Date.now() / 1000) + 300
+
+  it('cal_edit_<token>: deletes row, writes cal_edit_await row, sends "What would you like to change"', async () => {
+    dbRun(
+      "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+      ['cal_edit_tok1', 'Edit Dentist', eventData, exp()]
+    )
+    await handleCallback({ id: 'cq1', data: 'cal_edit_tok1' })
+
+    // original row deleted
+    const deleted = queryOne("SELECT * FROM pending_confirmations WHERE action_id = ?", ['cal_edit_tok1'])
+    assert.equal(deleted, undefined, 'expected cal_edit_tok1 row to be deleted')
+
+    // new cal_edit_await_ row written
+    const awaitRows = query("SELECT action_id FROM pending_confirmations WHERE action_id LIKE 'cal_edit_await_%'")
+    assert.equal(awaitRows.length, 1, 'expected one cal_edit_await_ row')
+
+    // send called with "What would you like to change"
+    const sends = getSendCalls()
+    const body = JSON.stringify(sends.map(c => c.arguments[1]))
+    assert.ok(body.includes('What would you like to change'), 'expected "What would you like to change" in message')
+  })
+
+  it('cal_delete_<token>: deletes row, writes cal_confirm_delete row, sendWithButtons with delete confirmation', async () => {
+    dbRun(
+      "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+      ['cal_delete_tok1', 'Delete Dentist', eventData, exp()]
+    )
+    await handleCallback({ id: 'cq1', data: 'cal_delete_tok1' })
+
+    // original row deleted
+    const deleted = queryOne("SELECT * FROM pending_confirmations WHERE action_id = ?", ['cal_delete_tok1'])
+    assert.equal(deleted, undefined, 'expected cal_delete_tok1 row to be deleted')
+
+    // new cal_confirm_delete_ row written
+    const confirmRows = query("SELECT action_id FROM pending_confirmations WHERE action_id LIKE 'cal_confirm_delete_%'")
+    assert.equal(confirmRows.length, 1, 'expected one cal_confirm_delete_ row')
+
+    // sendWithButtons called with delete buttons
+    const sends = getSendCalls()
+    const body = JSON.stringify(sends.map(c => c.arguments[1]))
+    assert.ok(body.includes('Yes, Delete') || body.includes('🗑'), 'expected delete button in message')
+    assert.ok(body.includes('Cancel') || body.includes('❌'), 'expected cancel button in message')
+  })
+
+  it('cal_confirm_delete_<token>: calls deleteEvent, deletes row, sends "Deleted", logs audit', async () => {
+    const confirmData = JSON.stringify({
+      calendarUrl: 'https://cal/home',
+      uid: 'uid1',
+      title: 'Dentist',
+      start: '2026-03-20T15:00:00',
+      calendar: 'Garrett',
+    })
+    dbRun(
+      "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+      ['cal_confirm_delete_tok1', 'Delete Dentist', confirmData, exp()]
+    )
+    await handleCallback({ id: 'cq1', data: 'cal_confirm_delete_tok1' })
+
+    // deleteEvent called with calendarUrl and uid
+    assert.equal(mockDeleteEvent.mock.calls.length, 1, 'expected deleteEvent to be called once')
+    assert.equal(mockDeleteEvent.mock.calls[0].arguments[0], 'https://cal/home')
+    assert.equal(mockDeleteEvent.mock.calls[0].arguments[1], 'uid1')
+
+    // row deleted
+    const deleted = queryOne("SELECT * FROM pending_confirmations WHERE action_id = ?", ['cal_confirm_delete_tok1'])
+    assert.equal(deleted, undefined, 'expected row to be deleted')
+
+    // send called with "Deleted"
+    const sends = getSendCalls()
+    const body = JSON.stringify(sends.map(c => c.arguments[1]))
+    assert.ok(body.includes('Deleted'), 'expected "Deleted" in message')
+
+    // audit logged
+    const auditRows = query("SELECT * FROM audit_log WHERE module = 'calendar' AND action = 'delete_event'")
+    assert.equal(auditRows.length, 1, 'expected one delete_event audit log entry')
+  })
+
+  it('cal_undo_<token> undoType create: calls deleteEvent, deletes row, sends undo message, logs undo_create', async () => {
+    const undoData = JSON.stringify({
+      undoType: 'create',
+      calendarUrl: 'https://cal/home',
+      uid: 'uid1',
+    })
+    dbRun(
+      "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+      ['cal_undo_tok1', 'Undo create', undoData, exp()]
+    )
+    await handleCallback({ id: 'cq1', data: 'cal_undo_tok1' })
+
+    // deleteEvent called
+    assert.equal(mockDeleteEvent.mock.calls.length, 1, 'expected deleteEvent to be called')
+    assert.equal(mockDeleteEvent.mock.calls[0].arguments[1], 'uid1')
+
+    // row deleted
+    const deleted = queryOne("SELECT * FROM pending_confirmations WHERE action_id = ?", ['cal_undo_tok1'])
+    assert.equal(deleted, undefined, 'expected row to be deleted')
+
+    // send called with undo message
+    const sends = getSendCalls()
+    const body = JSON.stringify(sends.map(c => c.arguments[1]))
+    assert.ok(body.includes('undo') || body.includes('Undo') || body.includes('↩️'), 'expected undo message')
+
+    // audit logged
+    const auditRows = query("SELECT * FROM audit_log WHERE module = 'calendar' AND action = 'undo_create'")
+    assert.equal(auditRows.length, 1, 'expected one undo_create audit log entry')
+  })
+
+  it('cal_undo_<token> undoType update: calls updateEvent with original data, logs undo_update', async () => {
+    const undoData = JSON.stringify({
+      undoType: 'update',
+      calendarUrl: 'https://cal/home',
+      uid: 'uid1',
+      original: { title: 'Old Title', start: '2026-03-20T14:00:00' },
+    })
+    dbRun(
+      "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+      ['cal_undo_tok1', 'Undo update', undoData, exp()]
+    )
+    await handleCallback({ id: 'cq1', data: 'cal_undo_tok1' })
+
+    // updateEvent called with calendarUrl, uid, and original
+    assert.equal(mockUpdateEvent.mock.calls.length, 1, 'expected updateEvent to be called once')
+    assert.equal(mockUpdateEvent.mock.calls[0].arguments[0], 'https://cal/home')
+    assert.equal(mockUpdateEvent.mock.calls[0].arguments[1], 'uid1')
+    assert.deepEqual(mockUpdateEvent.mock.calls[0].arguments[2], { title: 'Old Title', start: '2026-03-20T14:00:00' })
+
+    // audit logged
+    const auditRows = query("SELECT * FROM audit_log WHERE module = 'calendar' AND action = 'undo_update'")
+    assert.equal(auditRows.length, 1, 'expected one undo_update audit log entry')
+  })
+
+  it('cal_conflict_confirm_<token> actionType create: calls createEvent, writes cal_undo row, sendWithButtons with Edit button, logs create_event', async () => {
+    const conflictData = JSON.stringify({
+      actionType: 'create',
+      calendarUrl: 'https://cal/home',
+      event: { title: 'Dentist', start: '2026-03-20T15:00:00', duration: 60, calendar: 'Garrett' },
+    })
+    dbRun(
+      "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+      ['cal_conflict_confirm_tok1', 'Conflict confirm Dentist', conflictData, exp()]
+    )
+    mockCreateEvent.mock.mockImplementationOnce(async () => ({ uid: 'uid-new' }))
+
+    await handleCallback({ id: 'cq1', data: 'cal_conflict_confirm_tok1' })
+
+    // createEvent called
+    assert.equal(mockCreateEvent.mock.calls.length, 1, 'expected createEvent to be called')
+
+    // cal_undo row written
+    const undoRows = query("SELECT action_id FROM pending_confirmations WHERE action_id LIKE 'cal_undo_%'")
+    assert.equal(undoRows.length, 1, 'expected one cal_undo_ row')
+
+    // sendWithButtons called with Edit button
+    const sends = getSendCalls()
+    const body = JSON.stringify(sends.map(c => c.arguments[1]))
+    assert.ok(body.includes('✏️ Edit') || body.includes('Edit'), 'expected Edit button')
+
+    // audit logged
+    const auditRows = query("SELECT * FROM audit_log WHERE module = 'calendar' AND action = 'create_event'")
+    assert.equal(auditRows.length, 1, 'expected one create_event audit log entry')
+  })
+
+  it('cal_conflict_confirm_<token> actionType update: calls updateEvent, writes cal_undo row, sendWithButtons with Undo button', async () => {
+    const conflictData = JSON.stringify({
+      actionType: 'update',
+      calendarUrl: 'https://cal/home',
+      uid: 'uid1',
+      changes: { title: 'New Title' },
+      original: { title: 'Old Title' },
+    })
+    dbRun(
+      "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+      ['cal_conflict_confirm_tok1', 'Conflict confirm update', conflictData, exp()]
+    )
+
+    await handleCallback({ id: 'cq1', data: 'cal_conflict_confirm_tok1' })
+
+    // updateEvent called with calendarUrl, uid, changes
+    assert.equal(mockUpdateEvent.mock.calls.length, 1, 'expected updateEvent to be called once')
+    assert.equal(mockUpdateEvent.mock.calls[0].arguments[0], 'https://cal/home')
+    assert.equal(mockUpdateEvent.mock.calls[0].arguments[1], 'uid1')
+    assert.deepEqual(mockUpdateEvent.mock.calls[0].arguments[2], { title: 'New Title' })
+
+    // cal_undo row written
+    const undoRows = query("SELECT action_id FROM pending_confirmations WHERE action_id LIKE 'cal_undo_%'")
+    assert.equal(undoRows.length, 1, 'expected one cal_undo_ row')
+
+    // sendWithButtons with "Updated." and Undo button
+    const sends = getSendCalls()
+    const body = JSON.stringify(sends.map(c => c.arguments[1]))
+    assert.ok(body.includes('Updated') || body.includes('✅'), 'expected Updated message')
+    assert.ok(body.includes('Undo') || body.includes('↩️'), 'expected Undo button')
+  })
+
+  it('expired/missing row: sends "This action has expired."', async () => {
+    await handleCallback({ id: 'cq1', data: 'cal_edit_no_such_token' })
+
+    const sends = getSendCalls()
+    const body = JSON.stringify(sends.map(c => c.arguments[1]))
+    assert.ok(body.includes('expired'), 'expected "expired" in message')
+  })
+
+  it('cal_cancel_<token>: deletes matching row(s), sends "Cancelled."', async () => {
+    dbRun(
+      "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+      ['cal_conflict_confirm_tok1', 'Conflict confirm', eventData, exp()]
+    )
+    await handleCallback({ id: 'cq1', data: 'cal_cancel_tok1' })
+
+    // row deleted
+    const remaining = query("SELECT action_id FROM pending_confirmations WHERE action_id LIKE '%tok1%'")
+    assert.equal(remaining.length, 0, 'expected matching row to be deleted')
+
+    // send called with "Cancelled."
+    const sends = getSendCalls()
+    const body = JSON.stringify(sends.map(c => c.arguments[1]))
+    assert.ok(body.includes('Cancelled'), 'expected "Cancelled" in message')
   })
 })

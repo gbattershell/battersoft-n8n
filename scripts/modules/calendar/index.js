@@ -325,5 +325,119 @@ async function handleEditDelta(text, existingEvent) {
 }
 
 export async function handleCallback(callbackQuery) {
-  throw new Error('Not implemented')
+  const { id: callbackQueryId, data } = callbackQuery
+  await answerCallbackQuery(callbackQueryId, '')
+
+  const tz = getUserTimezone()
+
+  // Cancel handler (for conflict and delete cancel buttons)
+  if (data.startsWith('cal_cancel_')) {
+    const t = data.slice('cal_cancel_'.length)
+    dbRun("DELETE FROM pending_confirmations WHERE action_id LIKE ? AND module = 'calendar'", [`%${t}`])
+    await send('Cancelled.')
+    return
+  }
+
+  // Order matters: check longer prefixes first
+  if (data.startsWith('cal_confirm_delete_')) {
+    const t = data.slice('cal_confirm_delete_'.length)
+    const row = queryOne("SELECT data FROM pending_confirmations WHERE action_id = ?", [`cal_confirm_delete_${t}`])
+    if (!row) { await send('This action has expired.'); return }
+    const evt = JSON.parse(row.data)
+    await deleteEvent(evt.calendarUrl, evt.uid)
+    dbRun("DELETE FROM pending_confirmations WHERE action_id = ?", [`cal_confirm_delete_${t}`])
+    auditLog('calendar', 'delete_event', { uid: evt.uid, title: evt.title, calendar: evt.calendar })
+    await send(`🗑 Deleted: ${esc(evt.title)} — ${formatDate(evt.start, tz)}`)
+    return
+  }
+
+  if (data.startsWith('cal_conflict_confirm_')) {
+    const t = data.slice('cal_conflict_confirm_'.length)
+    const row = queryOne("SELECT data FROM pending_confirmations WHERE action_id = ?", [`cal_conflict_confirm_${t}`])
+    if (!row) { await send('This action has expired.'); return }
+    const payload = JSON.parse(row.data)
+    dbRun("DELETE FROM pending_confirmations WHERE action_id = ?", [`cal_conflict_confirm_${t}`])
+
+    if (payload.actionType === 'create') {
+      const { uid } = await createEvent(payload.calendarUrl, payload.event)
+      const ut = token()
+      dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+        [`cal_undo_${ut}`, `Undo: ${payload.event.title}`, JSON.stringify({ undoType: 'create', calendarUrl: payload.calendarUrl, uid }), Math.floor(Date.now() / 1000) + 300])
+      auditLog('calendar', 'create_event', payload.event)
+      const et = token()
+      const editPayload = JSON.stringify({ calendarUrl: payload.calendarUrl, uid, title: payload.event.title, start: payload.event.start, duration: payload.event.duration, calendar: payload.event.calendar })
+      dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+        [`cal_edit_${et}`, `Edit ${payload.event.title}`, editPayload, Math.floor(Date.now() / 1000) + 300])
+      await sendWithButtons(
+        `✅ ${esc(payload.event.title)} — ${formatDate(payload.event.start, tz)}, ${formatTime(payload.event.start, tz)} (${payload.event.duration}m) · ${esc(payload.event.calendar)}`,
+        [[{ text: '✏️ Edit', callback_data: `cal_edit_${et}` }]]
+      )
+    } else if (payload.actionType === 'update') {
+      await updateEvent(payload.calendarUrl, payload.uid, payload.changes)
+      const ut = token()
+      dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+        [`cal_undo_${ut}`, 'Undo update', JSON.stringify({ undoType: 'update', calendarUrl: payload.calendarUrl, uid: payload.uid, original: payload.original }), Math.floor(Date.now() / 1000) + 300])
+      auditLog('calendar', 'update_event', { uid: payload.uid, changes: payload.changes })
+      await sendWithButtons('✅ Updated.', [[{ text: '↩️ Undo', callback_data: `cal_undo_${ut}` }]])
+    }
+    return
+  }
+
+  if (data.startsWith('cal_edit_')) {
+    const t = data.slice('cal_edit_'.length)
+    const row = queryOne("SELECT data FROM pending_confirmations WHERE action_id = ?", [`cal_edit_${t}`])
+    if (!row) { await send('This action has expired.'); return }
+    const evt = JSON.parse(row.data)
+    dbRun("DELETE FROM pending_confirmations WHERE action_id = ?", [`cal_edit_${t}`])
+    const at = token()
+    dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+      [`cal_edit_await_${at}`, `Editing: ${evt.title}`, JSON.stringify(evt), Math.floor(Date.now() / 1000) + 300])
+    await send('What would you like to change? (time, date, length, or calendar)')
+    return
+  }
+
+  if (data.startsWith('cal_delete_')) {
+    const t = data.slice('cal_delete_'.length)
+    const row = queryOne("SELECT data FROM pending_confirmations WHERE action_id = ?", [`cal_delete_${t}`])
+    if (!row) { await send('This action has expired.'); return }
+    const evt = JSON.parse(row.data)
+    dbRun("DELETE FROM pending_confirmations WHERE action_id = ?", [`cal_delete_${t}`])
+    const ct = token()
+    dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
+      [`cal_confirm_delete_${ct}`, `Delete: ${evt.title}`, JSON.stringify(evt), Math.floor(Date.now() / 1000) + 300])
+    await sendWithButtons(
+      `🗑 Delete ${esc(evt.title)} on ${formatDate(evt.start, tz)} at ${formatTime(evt.start, tz)}?`,
+      [[
+        { text: '🗑 Yes, Delete', callback_data: `cal_confirm_delete_${ct}` },
+        { text: '❌ Cancel', callback_data: `cal_cancel_${ct}` },
+      ]]
+    )
+    return
+  }
+
+  if (data.startsWith('cal_undo_')) {
+    const t = data.slice('cal_undo_'.length)
+    const row = queryOne("SELECT data FROM pending_confirmations WHERE action_id = ?", [`cal_undo_${t}`])
+    if (!row) { await send('Undo window has passed (5 min). Event not restored.'); return }
+    const payload = JSON.parse(row.data)
+    dbRun("DELETE FROM pending_confirmations WHERE action_id = ?", [`cal_undo_${t}`])
+
+    if (payload.undoType === 'create') {
+      await deleteEvent(payload.calendarUrl, payload.uid)
+      auditLog('calendar', 'undo_create', { uid: payload.uid })
+      await send('↩️ Event creation undone.')
+    } else if (payload.undoType === 'update') {
+      await updateEvent(payload.calendarUrl, payload.uid, payload.original)
+      auditLog('calendar', 'undo_update', { uid: payload.uid })
+      await send('↩️ Edit undone — event restored.')
+    } else if (payload.undoType === 'calendar_move') {
+      await deleteEvent(payload.newCalendarUrl, payload.newUid)
+      await createEvent(payload.originalCalendarUrl, { title: payload.original.title, start: payload.original.start, duration: payload.original.duration })
+      auditLog('calendar', 'undo_update', { originalUid: payload.newUid })
+      await send('↩️ Calendar move undone — event restored.')
+    }
+    return
+  }
+
+  logger.warn('calendar', 'handleCallback-unknown', data)
 }
