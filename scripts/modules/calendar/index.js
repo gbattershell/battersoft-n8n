@@ -399,9 +399,13 @@ async function handleEditDelta(text, existingEvent) {
   // Apply update (simple field changes only — calendar move not in spec for this task)
   const calChanges = { ...parsed.changes }
   delete calChanges.calendar
-  if (Object.keys(calChanges).length > 0) {
-    await updateEvent(existingEvent.calendarUrl, existingEvent.uid, calChanges)
+
+  if (Object.keys(calChanges).length === 0) {
+    await send("Calendar move isn't supported yet. Try changing the time, date, or duration instead.")
+    return
   }
+
+  await updateEvent(existingEvent.calendarUrl, existingEvent.uid, calChanges)
   const undoPayload = { undoType: 'update', calendarUrl: existingEvent.calendarUrl, uid: existingEvent.uid, original: { title: existingEvent.title, start: existingEvent.start, duration: existingEvent.duration, calendar: existingEvent.calendar } }
 
   const ut = token()
