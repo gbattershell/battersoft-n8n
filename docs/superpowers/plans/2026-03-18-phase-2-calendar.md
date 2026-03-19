@@ -1732,3 +1732,20 @@ git commit -m "docs: add Phase 2 calendar CHANGELOG entry and placeholder workfl
 - [ ] **Step 5: Use finishing-a-development-branch skill to complete the work**
 
 Push branch and create PR against `main`.
+
+---
+
+## Carry-Forward Issues
+
+### Important
+
+- **Duplicate `localISO` and `addMinutesToLocalISO` helpers** (from Task 9): Both helpers exist in `caldav-client.js` (private, unexported) and were re-implemented in `index.js`. Fix: export from `caldav-client.js`, import in `index.js`, remove local copies. To address in Task 11.
+- **`runCreate` crashes on empty `calendar_mapping`** (from Task 9): `calendars[0]` is `undefined` when the table is empty — `calRow.caldav_id` throws. `runRead` guards against this with a `listCalendars()` retry; `runCreate`, `runDeleteByText`, and `handleEditDelta` need the same guard. To address in Task 11.
+
+### Minor
+
+- **Unused `query` import in `caldav-client.js`** (from Task 2): `query` is imported from `core/db.js` but never used. Remove from the destructuring import when Task 3 next modifies this file. ✅ Fixed in Task 3.
+- **Missing cross-timezone conversion test** (from Task 3): Tests only exercise events stored in `America/Chicago` — no test where event's TZID differs from user's display timezone. To add in Task 13 (PR prep) or as a standalone test before merge.
+- **Unused `after` import in caldav-client.test.js** (from Task 4): `after` imported from `node:test` but never used. Remove in Task 13.
+- **`addMinutesToLocalISO` naive DST arithmetic** (from Task 4): Durations spanning a DST transition produce technically invalid DTEND times (e.g. `02:30` during spring-forward). iCloud handles this gracefully in practice. Acknowledge during PR review.
+- **`updateEvent`/`deleteEvent` fetches all calendar objects without time-range** (from Task 4): Fetches entire calendar to find one UID — slow on large calendars. No impact for personal use. Minor optimization for later.
