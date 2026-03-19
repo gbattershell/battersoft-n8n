@@ -43,7 +43,7 @@ export async function handleUpdate(update) {
       // Phase 4: news
     } else {
       // Check for pending calendar edit-await before defaulting to gmail
-      const editAwait = queryOne("SELECT * FROM pending_confirmations WHERE module = 'calendar' AND action_id LIKE 'cal_edit_await_%' AND expires_at > unixepoch() LIMIT 1")
+      const editAwait = queryOne("SELECT * FROM pending_confirmations WHERE module = 'calendar' AND action_id LIKE 'cal_edit_await_%' AND expires_at > unixepoch() LIMIT 1") // synchronous — better-sqlite3
       if (editAwait) {
         const mod = await import('../modules/calendar/index.js')
         await mod.run({ message, editAwait })
