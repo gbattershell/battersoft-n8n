@@ -1,5 +1,5 @@
 // tests/modules/calendar/caldav-client.test.js
-import { describe, it, mock, beforeEach, after } from 'node:test'
+import { describe, it, mock, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 
 process.env.DB_PATH = ':memory:'

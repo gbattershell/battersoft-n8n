@@ -136,9 +136,10 @@ function formatDtstart(isoLocal) {
   return isoLocal.replace(/[-:]/g, '')
 }
 
-// Escape iCalendar text values
+// Escape iCalendar text values (RFC 5545 §3.3.11)
 function icalEscape(str) {
   return String(str)
+    .replace(/\r/g, '')       // strip bare CR — CRLF in a value would break line structure
     .replace(/\\/g, '\\\\')
     .replace(/;/g, '\\;')
     .replace(/,/g, '\\,')

@@ -54,6 +54,8 @@ export async function handleUpdate(update) {
     }
   } else if (update.callback_query) {
     const callbackQuery = update.callback_query
+    const callbackChatId = String(callbackQuery.message?.chat?.id)
+    if (callbackChatId !== String(ALLOWED_CHAT_ID)) return
     const mod = await import('./callback-handler.js')
     await mod.handle(callbackQuery)
   }

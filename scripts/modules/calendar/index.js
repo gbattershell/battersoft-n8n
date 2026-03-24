@@ -483,6 +483,9 @@ export async function handleCallback(callbackQuery) {
         [`cal_undo_${ut}`, 'Undo update', JSON.stringify({ undoType: 'update', calendarUrl: payload.calendarUrl, uid: payload.uid, original: payload.original }), Math.floor(Date.now() / 1000) + 300])
       auditLog('calendar', 'update_event', { uid: payload.uid, changes: payload.changes })
       await sendWithButtons('✅ Updated.', [[{ text: '↩️ Undo', callback_data: `cal_undo_${ut}` }]])
+    } else {
+      logger.warn('calendar', 'handleCallback-unknown-action-type', payload.actionType)
+      await send('Unknown action type. Please try again.')
     }
     return
   }
@@ -534,11 +537,6 @@ export async function handleCallback(callbackQuery) {
       await updateEvent(payload.calendarUrl, payload.uid, payload.original)
       auditLog('calendar', 'undo_update', { uid: payload.uid })
       await send('↩️ Edit undone — event restored.')
-    } else if (payload.undoType === 'calendar_move') {
-      await deleteEvent(payload.newCalendarUrl, payload.newUid)
-      await createEvent(payload.originalCalendarUrl, { title: payload.original.title, start: payload.original.start, duration: payload.original.duration })
-      auditLog('calendar', 'undo_update', { originalUid: payload.newUid })
-      await send('↩️ Calendar move undone — event restored.')
     }
     return
   }
