@@ -1,0 +1,110 @@
+{
+  "name": "Gmail Digest",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 7 * * *"
+            }
+          ]
+        }
+      },
+      "id": "8f7aed78-29cf-4be8-beb2-0da3b35918a6",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://bot:3000/gmail/digest",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "7cb12c2a-2261-488f-a3ef-6ac61d507761",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        224,
+        0
+      ],
+      "continueOnFail": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $env.ALLOWED_CHAT_ID }}"
+            },
+            {
+              "name": "text",
+              "value": "=⚠️ Gmail Digest workflow error: {{ $json.error?.message || 'unknown error' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cef6c506-abf2-48f0-974b-844a8801352a",
+      "name": "Telegram Error Notify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        96
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Telegram Error Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "84ec57a5-be2f-4d96-a6bc-1daf9ad77aff",
+  "meta": {
+    "instanceId": "5b4348a626582a191e33d7794342d94a1f0a3f1bb919b43c1fe4061d746f0fc1"
+  },
+  "id": "YlXIpI9UOMkEegjm",
+  "tags": []
+}

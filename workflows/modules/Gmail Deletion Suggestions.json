@@ -1,0 +1,110 @@
+{
+  "name": "Gmail Deletion Suggestions",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 17 * * *"
+            }
+          ]
+        }
+      },
+      "id": "35de23b1-5bf9-4fe0-9140-08f44bce9388",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://bot:3000/gmail/deletion",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "fb2527d7-d42b-4a41-a557-a2b496d9f07f",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        224,
+        0
+      ],
+      "continueOnFail": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "chat_id",
+              "value": "={{ $env.ALLOWED_CHAT_ID }}"
+            },
+            {
+              "name": "text",
+              "value": "=⚠️ Gmail Deletion workflow error: {{ $json.error?.message || 'unknown error' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4bc23e97-22ab-433f-990b-627129b3cb1e",
+      "name": "Telegram Error Notify",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        432,
+        96
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Telegram Error Notify",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "b0468927-bcb3-4a9f-b882-38053d523c25",
+  "meta": {
+    "instanceId": "5b4348a626582a191e33d7794342d94a1f0a3f1bb919b43c1fe4061d746f0fc1"
+  },
+  "id": "DkkIwE8ybE6uWvb3",
+  "tags": []
+}
