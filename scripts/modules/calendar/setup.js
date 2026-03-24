@@ -15,20 +15,10 @@ if (!process.env.DB_PATH) {
 
 const rl = createInterface({ input: process.stdin, output: process.stdout })
 const ask = (q) => new Promise(resolve => rl.question(q, resolve))
-const askSecret = (q) => new Promise(resolve => {
-  // Suppress stdout so readline doesn't echo the password, then restore
-  const origWrite = process.stdout.write.bind(process.stdout)
-  process.stdout.write = () => true
-  rl.question(q, answer => {
-    process.stdout.write = origWrite
-    origWrite('\n')
-    resolve(answer)
-  })
-})
 
 try {
   const email = await ask('Apple ID email: ')
-  const password = await askSecret('App-specific password: ')
+  const password = await ask('App-specific password: ')
   const tz = await ask('Timezone (default America/Chicago): ') || 'America/Chicago'
 
   // Validate timezone
