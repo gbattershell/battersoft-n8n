@@ -121,6 +121,7 @@ describe('telegram-router.js', () => {
         callback_query: {
           id: 'cq-1',
           data: 'confirm_some-action',
+          message: { chat: { id: 12345 } },
         },
       }
       await handleUpdate(update)

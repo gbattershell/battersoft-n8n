@@ -10,6 +10,11 @@ Format: [Keep a Changelog](https://keepachangelog.com) — Added / Changed / Fix
 ## [Unreleased]
 
 ### Added
+- Calendar module: full CRUD for iCloud CalDAV via `cal` Telegram command — read (today/tomorrow/this week/next week/free-form), create with conflict detection (hard overlap blocks, soft 30min proximity advisory), edit via [Edit] button + natural language delta + [Undo], delete with confirmation; supports all 8 shared calendars with per-event calendar labels
+- `scripts/modules/calendar/caldav-client.js`: tsdav + ical.js wrapper with DAVClient singleton, iCalendar parsing/serialization, timezone conversion
+- `scripts/modules/calendar/parser.js`: Claude haiku NLP — natural language → structured event JSON
+- `scripts/modules/calendar/setup.js`: one-time CLI for Apple ID email + app-specific password + timezone — stores credentials AES-256-GCM encrypted in SQLite
+- Router edit-await intercept: `telegram-router.js` default fallback checks for pending `cal_edit_await_` rows before routing to Gmail, enabling free-text edit replies without `cal` prefix
 <!-- New features or capabilities.
      Examples:
      - Gmail module: daily digest at 7:30 AM — surfaces actionable emails with Claude haiku fallback
