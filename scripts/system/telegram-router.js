@@ -1,6 +1,6 @@
 // scripts/system/telegram-router.js
 // Long-polls Telegram getUpdates and routes messages to modules.
-import { getPreference, setPreference } from '../core/db.js'
+import { getPreference, setPreference, queryOne } from '../core/db.js'
 import { logger } from '../core/logger.js'
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN
@@ -33,7 +33,8 @@ export async function handleUpdate(update) {
       const mod = await import('../modules/status/index.js')
       await mod.run({ message })
     } else if (text.startsWith('cal')) {
-      // Phase 2: calendar
+      const mod = await import('../modules/calendar/index.js')
+      await mod.run({ message })
     } else if (text.startsWith('$')) {
       // Phase 3: tiller
     } else if (text.startsWith('gh')) {
@@ -41,12 +42,20 @@ export async function handleUpdate(update) {
     } else if (text.startsWith('news')) {
       // Phase 4: news
     } else {
-      // Default fallback: any unrecognized message triggers gmail digest
-      const mod = await import('../modules/gmail/index.js')
-      await mod.run({ action: 'digest', message })
+      // Check for pending calendar edit-await before defaulting to gmail
+      const editAwait = queryOne("SELECT * FROM pending_confirmations WHERE module = 'calendar' AND action_id LIKE 'cal_edit_await_%' AND expires_at > unixepoch() LIMIT 1") // synchronous — better-sqlite3
+      if (editAwait) {
+        const mod = await import('../modules/calendar/index.js')
+        await mod.run({ message, editAwait })
+      } else {
+        const mod = await import('../modules/gmail/index.js')
+        await mod.run({ action: 'digest', message })
+      }
     }
   } else if (update.callback_query) {
     const callbackQuery = update.callback_query
+    const callbackChatId = String(callbackQuery.message?.chat?.id)
+    if (callbackChatId !== String(ALLOWED_CHAT_ID)) return
     const mod = await import('./callback-handler.js')
     await mod.handle(callbackQuery)
   }
