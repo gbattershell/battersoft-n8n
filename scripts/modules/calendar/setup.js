@@ -16,27 +16,14 @@ if (!process.env.DB_PATH) {
 const rl = createInterface({ input: process.stdin, output: process.stdout })
 const ask = (q) => new Promise(resolve => rl.question(q, resolve))
 const askSecret = (q) => new Promise(resolve => {
-  process.stdout.write(q)
-  process.stdin.setRawMode(true)
-  process.stdin.resume()
-  process.stdin.setEncoding('utf8')
-  let val = ''
-  const onData = (ch) => {
-    if (ch === '\r' || ch === '\n') {
-      process.stdin.setRawMode(false)
-      process.stdin.pause()
-      process.stdin.removeListener('data', onData)
-      process.stdout.write('\n')
-      resolve(val)
-    } else if (ch === '\u0003') {
-      process.exit(1) // Ctrl-C
-    } else if (ch === '\u007f') {
-      val = val.slice(0, -1) // backspace
-    } else {
-      val += ch
-    }
-  }
-  process.stdin.on('data', onData)
+  // Suppress stdout so readline doesn't echo the password, then restore
+  const origWrite = process.stdout.write.bind(process.stdout)
+  process.stdout.write = () => true
+  rl.question(q, answer => {
+    process.stdout.write = origWrite
+    origWrite('\n')
+    resolve(answer)
+  })
 })
 
 try {
