@@ -1,7 +1,7 @@
 // scripts/modules/calendar/setup.js
 // One-time CLI to authorize iCloud CalDAV and store credentials.
 // Run: source .env && node scripts/modules/calendar/setup.js
-import { createInterface } from 'node:readline'
+import { createInterface } from 'node:readline/promises'
 import { setSecret, setPreference, run as dbRun } from '../../core/db.js'
 
 if (!process.env.ENCRYPTION_KEY) {
@@ -14,12 +14,11 @@ if (!process.env.DB_PATH) {
 }
 
 const rl = createInterface({ input: process.stdin, output: process.stdout })
-const ask = (q) => new Promise(resolve => rl.question(q, resolve))
 
 try {
-  const email = await ask('Apple ID email: ')
-  const password = await ask('App-specific password: ')
-  const tz = await ask('Timezone (default America/Chicago): ') || 'America/Chicago'
+  const email = await rl.question('Apple ID email: ')
+  const password = await rl.question('App-specific password: ')
+  const tz = (await rl.question('Timezone (default America/Chicago): ')) || 'America/Chicago'
 
   // Validate timezone
   try {
