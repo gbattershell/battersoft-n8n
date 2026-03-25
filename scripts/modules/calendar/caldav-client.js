@@ -179,13 +179,9 @@ export async function getEvents(calendarUrl, start, end) {
         continue
       }
 
-      // Expand recurring event — start iterator near the range start to skip old occurrences
-      const masterDtstart = icalEvent.startDate
-      const iterStart = masterDtstart.isDate
-        ? ICAL.Time.fromDateString(start.slice(0, 10))
-        : ICAL.Time.fromJSDate(new Date(startUtc), true)
-
-      const iter = icalEvent.iterator(iterStart)
+      // Expand recurring event from its original DTSTART — overriding dtstart breaks
+      // rules like FREQ=YEARLY that are relative to the original anchor date
+      const iter = icalEvent.iterator()
       let next
       while ((next = iter.next())) {
         if (next.toJSDate().getTime() >= endMs) break
