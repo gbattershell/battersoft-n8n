@@ -1,11 +1,9 @@
 // scripts/modules/calendar/index.js
-import { randomUUID } from 'node:crypto'
 import { heartbeat, error as statusError } from '../../core/status.js'
 import { logger } from '../../core/logger.js'
-import { auditLog, run as dbRun, query, queryOne, getPreference } from '../../core/db.js'
-import { send, sendWithButtons, answerCallbackQuery } from '../../core/telegram.js'
-import { getEvents, createEvent, updateEvent, deleteEvent, listCalendars, localISO, addMinutesToLocalISO } from './caldav-client.js'
-import { parse } from './parser.js'
+import { query, getPreference } from '../../core/db.js'
+import { send } from '../../core/telegram.js'
+import { getEvents, listCalendars } from './caldav-client.js'
 import { registerRoute } from '../../system/http-server.js'
 
 // Register HTTP route for n8n scheduled trigger
@@ -17,10 +15,6 @@ registerRoute('POST', '/calendar/digest', (req, res) => {
 
 function esc(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
-function token() {
-  return randomUUID().slice(0, 8)
 }
 
 function getUserTimezone() {
@@ -76,22 +70,48 @@ function computeDateRange(keyword, tz) {
   return null
 }
 
-const READ_KEYWORDS = new Set(['today', 'tomorrow', 'this week', 'next week'])
+const READ_KEYWORDS = ['today', 'tomorrow', 'this week', 'next week']
 
-async function runRead(start, end) {
+// Parse "cal [calendarName?] [timeKeyword]" — returns { keyword, calFilter } or null
+function parseReadCommand(body) {
+  const lower = body.toLowerCase()
+  for (const kw of READ_KEYWORDS) {
+    if (lower === kw) return { keyword: kw, calFilter: null }
+    if (lower.endsWith(' ' + kw)) {
+      const prefix = body.slice(0, lower.lastIndexOf(' ' + kw)).trim()
+      return { keyword: kw, calFilter: prefix || null }
+    }
+  }
+  return null
+}
+
+async function runRead(start, end, calFilter) {
   const tz = getUserTimezone()
-  const calendars = getCalendars()
+  let calendars = getCalendars()
   if (calendars.length === 0) {
     await listCalendars()
-    return runRead(start, end)
+    calendars = getCalendars()
+  }
+
+  // Apply calendar name filter if provided
+  if (calFilter) {
+    const filterLower = calFilter.toLowerCase()
+    const filtered = calendars.filter(c =>
+      c.display_label.toLowerCase().includes(filterLower) ||
+      c.caldav_name.toLowerCase().includes(filterLower)
+    )
+    if (filtered.length > 0) calendars = filtered
   }
 
   const allEvents = []
+  const seenUids = new Set()
   const results = await Promise.all(
     calendars.map(cal => getEvents(cal.caldav_id, start, end))
   )
   for (let i = 0; i < calendars.length; i++) {
     for (const evt of results[i]) {
+      if (seenUids.has(evt.uid)) continue
+      seenUids.add(evt.uid)
       allEvents.push({ ...evt, calLabel: calendars[i].display_label, calEmoji: calendars[i].emoji || '' })
     }
   }
@@ -109,76 +129,31 @@ async function runRead(start, end) {
 
   const dateLabel = formatDate(start, tz)
   const lines = [`📅 <b>${dateLabel}</b>\n`]
-  const buttons = []
 
   for (const evt of allEvents) {
-    const t = token()
     const timeStr = evt.allDay ? '         ' : formatTime(evt.start, tz).padStart(9)
     const label = `${evt.calEmoji ? evt.calEmoji + ' ' : ''}${esc(evt.calLabel)}`
     lines.push(`${timeStr}  ${esc(evt.title)} · ${label}`)
-
-    const payload = JSON.stringify({ calendarUrl: evt.calendarUrl, uid: evt.uid, title: evt.title, start: evt.start, duration: evt.duration, calendar: evt.calLabel })
-    const exp = Math.floor(Date.now() / 1000) + 300
-    dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
-      [`cal_edit_${t}`, `Edit ${evt.title}`, payload, exp])
-    const t2 = token()
-    dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
-      [`cal_delete_${t2}`, `Delete ${evt.title}`, payload, exp])
-    buttons.push([
-      { text: '✏️ Edit', callback_data: `cal_edit_${t}` },
-      { text: '🗑 Delete', callback_data: `cal_delete_${t2}` },
-    ])
   }
 
-  const calendarsWithEvents = new Set(allEvents.map(e => e.calLabel))
-  const emptyCount = calendars.length - calendarsWithEvents.size
-  if (emptyCount > 0) {
-    lines.push(`\nNo events on ${emptyCount} other calendar${emptyCount !== 1 ? 's' : ''}.`)
-  }
-
-  await sendWithButtons(lines.join('\n'), buttons)
+  await send(lines.join('\n'))
 }
 
-export async function run({ message, editAwait } = {}) {
+export async function run({ message } = {}) {
   try {
     const rawText = message?.text || ''
-
-    if (editAwait) {
-      dbRun("DELETE FROM pending_confirmations WHERE action_id = ?", [editAwait.action_id])
-      await handleEditDelta(rawText, JSON.parse(editAwait.data))
-      await heartbeat('calendar')
-      return
-    }
-
     const body = rawText.replace(/^cal\s*/i, '').trim()
-    const bodyLower = body.toLowerCase()
 
-    const keyword = READ_KEYWORDS.has(bodyLower) ? bodyLower : null
-    if (keyword) {
+    const parsed = parseReadCommand(body)
+    if (parsed) {
       const tz = getUserTimezone()
-      const range = computeDateRange(keyword, tz)
-      await runRead(range.start, range.end)
+      const range = computeDateRange(parsed.keyword, tz)
+      await runRead(range.start, range.end, parsed.calFilter)
       await heartbeat('calendar')
       return
     }
 
-    const parsed = await parse(body)
-    if (parsed.confidence === 'low' || parsed.intent === 'unknown') {
-      await send("I couldn't parse that. Try: <code>cal add dentist Friday 3pm</code>")
-      await heartbeat('calendar')
-      return
-    }
-
-    if (parsed.intent === 'read') {
-      await runRead(parsed.start, parsed.end)
-    } else if (parsed.intent === 'create') {
-      await runCreate(parsed)
-    } else if (parsed.intent === 'delete') {
-      await runDeleteByText(parsed)
-    } else {
-      await send("I couldn't parse that. Try: <code>cal add dentist Friday 3pm</code>")
-    }
-
+    await send("Try: <code>cal today</code>, <code>cal this week</code>, or <code>cal kelsey this week</code>")
     await heartbeat('calendar')
   } catch (err) {
     await statusError('calendar', err)
@@ -186,360 +161,9 @@ export async function run({ message, editAwait } = {}) {
   }
 }
 
-
-async function findConflicts(startIso, endIso, excludeUid) {
-  const tz = getUserTimezone()
-  const calendars = getCalendars()
-  // Fetch events in a ±2 hour window for proximity check
-  const windowStartMs = new Date(startIso + 'Z').getTime() - 2 * 3600_000
-  const windowEndMs = new Date(endIso + 'Z').getTime() + 2 * 3600_000
-  const wsStr = localISO(new Date(windowStartMs), tz)
-  const weStr = localISO(new Date(windowEndMs), tz)
-
-  const results = await Promise.all(calendars.map(cal => getEvents(cal.caldav_id, wsStr, weStr)))
-  const allEvents = []
-  for (let i = 0; i < calendars.length; i++) {
-    for (const evt of results[i]) {
-      if (evt.allDay) continue
-      if (excludeUid && evt.uid === excludeUid) continue
-      allEvents.push({ ...evt, calLabel: calendars[i].display_label })
-    }
-  }
-
-  const evtStart = new Date(startIso + 'Z').getTime()
-  const evtEnd = new Date(endIso + 'Z').getTime()
-  const hard = []
-  const soft = []
-
-  for (const other of allEvents) {
-    const oStart = new Date(other.start + 'Z').getTime()
-    const oEnd = new Date(other.end + 'Z').getTime()
-    if (evtStart < oEnd && evtEnd > oStart) {
-      hard.push(other)
-      continue
-    }
-    const gap = Math.min(Math.abs(evtStart - oEnd), Math.abs(oStart - evtEnd))
-    const gapMin = Math.round(gap / 60_000)
-    if (gapMin <= 30) {
-      soft.push({ ...other, gapMin })
-    }
-  }
-
-  return { hard, soft }
-}
-
-async function runCreate(parsed) {
-  const calendars = getCalendars()
-  if (calendars.length === 0) {
-    await send('No calendars set up. Run setup first.')
-    return
-  }
-  const tz = getUserTimezone()
-  const calRow = calendars.find(c => c.display_label === parsed.calendar) || calendars[0]
-  const calendarUrl = calRow.caldav_id
-
-  const duration = parsed.duration || 60
-  const endIso = addMinutesToLocalISO(parsed.start, duration)
-  const { hard, soft } = await findConflicts(parsed.start, endIso, null)
-
-  if (hard.length > 0) {
-    const t = token()
-    const payload = JSON.stringify({
-      actionType: 'create',
-      calendarUrl,
-      event: { title: parsed.title, start: parsed.start, duration, calendar: parsed.calendar },
-    })
-    const exp = Math.floor(Date.now() / 1000) + 300
-    dbRun(
-      "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
-      [`cal_conflict_confirm_${t}`, `Conflict confirm: ${parsed.title}`, payload, exp]
-    )
-
-    const lines = []
-    for (const h of hard) {
-      lines.push(`⚠️ Conflict: ${esc(parsed.title)} overlaps ${esc(h.title)} (${formatTime(h.start, tz)}–${formatTime(h.end, tz)} · ${esc(h.calLabel)}).`)
-    }
-    for (const s of soft) {
-      lines.push(`💡 Also nearby: ${esc(s.title)} at ${formatTime(s.start, tz)} (${s.gapMin}min gap · ${esc(s.calLabel)}). Heads up.`)
-    }
-    lines.push('\nSave anyway?')
-    await sendWithButtons(lines.join('\n'), [[
-      { text: '✅ Yes', callback_data: `cal_conflict_confirm_${t}` },
-      { text: '❌ Cancel', callback_data: `cal_cancel_${t}` },
-    ]])
-    return
-  }
-
-  // No hard conflict — create immediately
-  const { uid } = await createEvent(calendarUrl, { title: parsed.title, start: parsed.start, duration })
-
-  // Undo row
-  const ut = token()
-  const undoExp = Math.floor(Date.now() / 1000) + 300
-  dbRun(
-    "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
-    [`cal_undo_${ut}`, `Undo create: ${parsed.title}`, JSON.stringify({ undoType: 'create', calendarUrl, uid }), undoExp]
-  )
-
-  auditLog('calendar', 'create_event', { title: parsed.title, calendar: parsed.calendar, start: parsed.start, duration })
-
-  const durationStr = `${duration}m`
-  const et = token()
-  const editPayload = JSON.stringify({ calendarUrl, uid, title: parsed.title, start: parsed.start, duration, calendar: parsed.calendar })
-  const editExp = Math.floor(Date.now() / 1000) + 300
-  dbRun(
-    "INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
-    [`cal_edit_${et}`, `Edit ${parsed.title}`, editPayload, editExp]
-  )
-
-  await sendWithButtons(
-    `✅ ${esc(parsed.title)} — ${formatDate(parsed.start, tz)}, ${formatTime(parsed.start, tz)} (${durationStr}) · ${esc(parsed.calendar)}`,
-    [[{ text: '✏️ Edit', callback_data: `cal_edit_${et}` }]]
-  )
-
-  // Soft conflict advisory
-  if (soft.length > 0) {
-    const advisory = soft.map(s =>
-      `💡 Also nearby: ${esc(s.title)} at ${formatTime(s.start, tz)} (${s.gapMin}min gap · ${esc(s.calLabel)}). Heads up.`
-    ).join('\n')
-    await send(advisory)
-  }
-}
-
-async function runDeleteByText(parsed) {
-  const tz = getUserTimezone()
-  const calendars = getCalendars()
-
-  // Search all calendars ±3 days from parsed start
-  const centerDate = new Date(parsed.start + 'Z')  // treat as UTC for arithmetic
-  const searchStart = new Date(centerDate.getTime() - 3 * 86_400_000)
-  const searchEnd = new Date(centerDate.getTime() + 3 * 86_400_000)
-  const ssStr = localISO(searchStart, tz)
-  const seStr = localISO(searchEnd, tz)
-
-  const matches = []
-  const results = await Promise.all(calendars.map(cal => getEvents(cal.caldav_id, ssStr, seStr)))
-  for (let i = 0; i < calendars.length; i++) {
-    for (const evt of results[i]) {
-      if (evt.title.toLowerCase().includes((parsed.title || '').toLowerCase())) {
-        matches.push({ ...evt, calLabel: calendars[i].display_label })
-      }
-    }
-  }
-
-  if (matches.length === 0) {
-    await send("Couldn't find that event. Try <code>cal today</code> to see current events.")
-    return
-  }
-
-  if (matches.length > 1) {
-    const lines = ['Multiple matches found:']
-    const buttons = []
-    for (const m of matches) {
-      const t = token()
-      const payload = JSON.stringify({ calendarUrl: m.calendarUrl, uid: m.uid, title: m.title, start: m.start, calendar: m.calLabel })
-      dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
-        [`cal_delete_${t}`, `Delete: ${m.title}`, payload, Math.floor(Date.now() / 1000) + 300])
-      lines.push(`• ${esc(m.title)} — ${formatDate(m.start, tz)} at ${formatTime(m.start, tz)} · ${esc(m.calLabel)}`)
-      buttons.push([{ text: `🗑 ${m.title}`, callback_data: `cal_delete_${t}` }])
-    }
-    await sendWithButtons(lines.join('\n'), buttons)
-    return
-  }
-
-  // Single match — go to confirm flow
-  const m = matches[0]
-  const ct = token()
-  const payload = JSON.stringify({ calendarUrl: m.calendarUrl, uid: m.uid, title: m.title, start: m.start, calendar: m.calLabel })
-  dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
-    [`cal_confirm_delete_${ct}`, `Delete: ${m.title}`, payload, Math.floor(Date.now() / 1000) + 300])
-  await sendWithButtons(
-    `🗑 Delete ${esc(m.title)} on ${formatDate(m.start, tz)} at ${formatTime(m.start, tz)}?`,
-    [[
-      { text: '🗑 Yes, Delete', callback_data: `cal_confirm_delete_${ct}` },
-      { text: '❌ Cancel', callback_data: `cal_cancel_${ct}` },
-    ]]
-  )
-}
-
-async function handleEditDelta(text, existingEvent) {
-  const tz = getUserTimezone()
-  const parsed = await parse(text, { existingEvent })
-
-  if (parsed.confidence === 'low' || parsed.intent !== 'update') {
-    await send("I couldn't understand that change. Try: \"move to 4pm\" or \"change to Tuesday\"")
-    return
-  }
-
-  // Merge changes onto existing event for conflict check
-  const merged = { ...existingEvent, ...parsed.changes }
-  const endDate = addMinutesToLocalISO(merged.start, merged.duration || existingEvent.duration)
-  const { hard, soft } = await findConflicts(merged.start, endDate, existingEvent.uid)
-
-  if (hard.length > 0) {
-    const t = token()
-    const payload = {
-      actionType: 'update',
-      calendarUrl: existingEvent.calendarUrl,
-      uid: existingEvent.uid,
-      changes: parsed.changes,
-      original: { title: existingEvent.title, start: existingEvent.start, duration: existingEvent.duration, calendar: existingEvent.calendar },
-    }
-    dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
-      [`cal_conflict_confirm_${t}`, `Conflict: update ${existingEvent.title}`, JSON.stringify(payload), Math.floor(Date.now() / 1000) + 300])
-    const lines = hard.map(h => `⚠️ Conflict: overlaps ${esc(h.title)} (${formatTime(h.start, tz)}–${formatTime(h.end, tz)} · ${esc(h.calLabel)}).`)
-    lines.push('\nSave anyway?')
-    await sendWithButtons(lines.join('\n'), [[
-      { text: '✅ Yes', callback_data: `cal_conflict_confirm_${t}` },
-      { text: '❌ Cancel', callback_data: `cal_cancel_${t}` },
-    ]])
-    return
-  }
-
-  // Apply update (simple field changes only — calendar move not in spec for this task)
-  const calChanges = { ...parsed.changes }
-  delete calChanges.calendar
-
-  if (Object.keys(calChanges).length === 0) {
-    await send("Calendar move isn't supported yet. Try changing the time, date, or duration instead.")
-    return
-  }
-
-  await updateEvent(existingEvent.calendarUrl, existingEvent.uid, calChanges)
-  const undoPayload = { undoType: 'update', calendarUrl: existingEvent.calendarUrl, uid: existingEvent.uid, original: { title: existingEvent.title, start: existingEvent.start, duration: existingEvent.duration, calendar: existingEvent.calendar } }
-
-  const ut = token()
-  dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
-    [`cal_undo_${ut}`, `Undo: update ${existingEvent.title}`, JSON.stringify(undoPayload), Math.floor(Date.now() / 1000) + 300])
-
-  auditLog('calendar', 'update_event', { uid: existingEvent.uid, changes: parsed.changes })
-
-  const updated = { ...existingEvent, ...parsed.changes }
-  await sendWithButtons(
-    `✅ Updated: ${esc(updated.title)} — ${formatDate(updated.start, tz)}, ${formatTime(updated.start, tz)} (${updated.duration || existingEvent.duration}m) · ${esc(updated.calendar || existingEvent.calendar)}`,
-    [[{ text: '↩️ Undo', callback_data: `cal_undo_${ut}` }]]
-  )
-
-  if (soft.length > 0) {
-    const advisory = soft.map(s =>
-      `💡 Nearby: ${esc(s.title)} at ${formatTime(s.start, tz)} (${s.gapMin}min gap · ${esc(s.calLabel)}).`
-    ).join('\n')
-    await send(advisory)
-  }
-}
-
 export async function handleCallback(callbackQuery) {
-  const { id: callbackQueryId, data } = callbackQuery
-  await answerCallbackQuery(callbackQueryId, '')
-
-  const tz = getUserTimezone()
-
-  // Cancel handler (for conflict and delete cancel buttons)
-  if (data.startsWith('cal_cancel_')) {
-    const t = data.slice('cal_cancel_'.length)
-    dbRun("DELETE FROM pending_confirmations WHERE action_id LIKE ? AND module = 'calendar'", [`%${t}`])
-    await send('Cancelled.')
-    return
-  }
-
-  // Order matters: check longer prefixes first
-  if (data.startsWith('cal_confirm_delete_')) {
-    const t = data.slice('cal_confirm_delete_'.length)
-    const row = queryOne("SELECT data FROM pending_confirmations WHERE action_id = ?", [`cal_confirm_delete_${t}`])
-    if (!row) { await send('This action has expired.'); return }
-    const evt = JSON.parse(row.data)
-    await deleteEvent(evt.calendarUrl, evt.uid)
-    dbRun("DELETE FROM pending_confirmations WHERE action_id = ?", [`cal_confirm_delete_${t}`])
-    auditLog('calendar', 'delete_event', { uid: evt.uid, title: evt.title, calendar: evt.calendar })
-    await send(`🗑 Deleted: ${esc(evt.title)} — ${formatDate(evt.start, tz)}`)
-    return
-  }
-
-  if (data.startsWith('cal_conflict_confirm_')) {
-    const t = data.slice('cal_conflict_confirm_'.length)
-    const row = queryOne("SELECT data FROM pending_confirmations WHERE action_id = ?", [`cal_conflict_confirm_${t}`])
-    if (!row) { await send('This action has expired.'); return }
-    const payload = JSON.parse(row.data)
-    dbRun("DELETE FROM pending_confirmations WHERE action_id = ?", [`cal_conflict_confirm_${t}`])
-
-    if (payload.actionType === 'create') {
-      const { uid } = await createEvent(payload.calendarUrl, payload.event)
-      const ut = token()
-      dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
-        [`cal_undo_${ut}`, `Undo: ${payload.event.title}`, JSON.stringify({ undoType: 'create', calendarUrl: payload.calendarUrl, uid }), Math.floor(Date.now() / 1000) + 300])
-      auditLog('calendar', 'create_event', payload.event)
-      const et = token()
-      const editPayload = JSON.stringify({ calendarUrl: payload.calendarUrl, uid, title: payload.event.title, start: payload.event.start, duration: payload.event.duration, calendar: payload.event.calendar })
-      dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
-        [`cal_edit_${et}`, `Edit ${payload.event.title}`, editPayload, Math.floor(Date.now() / 1000) + 300])
-      await sendWithButtons(
-        `✅ ${esc(payload.event.title)} — ${formatDate(payload.event.start, tz)}, ${formatTime(payload.event.start, tz)} (${payload.event.duration}m) · ${esc(payload.event.calendar)}`,
-        [[{ text: '✏️ Edit', callback_data: `cal_edit_${et}` }]]
-      )
-    } else if (payload.actionType === 'update') {
-      await updateEvent(payload.calendarUrl, payload.uid, payload.changes)
-      const ut = token()
-      dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
-        [`cal_undo_${ut}`, 'Undo update', JSON.stringify({ undoType: 'update', calendarUrl: payload.calendarUrl, uid: payload.uid, original: payload.original }), Math.floor(Date.now() / 1000) + 300])
-      auditLog('calendar', 'update_event', { uid: payload.uid, changes: payload.changes })
-      await sendWithButtons('✅ Updated.', [[{ text: '↩️ Undo', callback_data: `cal_undo_${ut}` }]])
-    } else {
-      logger.warn('calendar', 'handleCallback-unknown-action-type', payload.actionType)
-      await send('Unknown action type. Please try again.')
-    }
-    return
-  }
-
-  if (data.startsWith('cal_edit_')) {
-    const t = data.slice('cal_edit_'.length)
-    const row = queryOne("SELECT data FROM pending_confirmations WHERE action_id = ?", [`cal_edit_${t}`])
-    if (!row) { await send('This action has expired.'); return }
-    const evt = JSON.parse(row.data)
-    dbRun("DELETE FROM pending_confirmations WHERE action_id = ?", [`cal_edit_${t}`])
-    const at = token()
-    dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
-      [`cal_edit_await_${at}`, `Editing: ${evt.title}`, JSON.stringify(evt), Math.floor(Date.now() / 1000) + 300])
-    await send('What would you like to change? (time, date, length, or calendar)')
-    return
-  }
-
-  if (data.startsWith('cal_delete_')) {
-    const t = data.slice('cal_delete_'.length)
-    const row = queryOne("SELECT data FROM pending_confirmations WHERE action_id = ?", [`cal_delete_${t}`])
-    if (!row) { await send('This action has expired.'); return }
-    const evt = JSON.parse(row.data)
-    dbRun("DELETE FROM pending_confirmations WHERE action_id = ?", [`cal_delete_${t}`])
-    const ct = token()
-    dbRun("INSERT INTO pending_confirmations (action_id, module, description, data, expires_at) VALUES (?, 'calendar', ?, ?, ?)",
-      [`cal_confirm_delete_${ct}`, `Delete: ${evt.title}`, JSON.stringify(evt), Math.floor(Date.now() / 1000) + 300])
-    await sendWithButtons(
-      `🗑 Delete ${esc(evt.title)} on ${formatDate(evt.start, tz)} at ${formatTime(evt.start, tz)}?`,
-      [[
-        { text: '🗑 Yes, Delete', callback_data: `cal_confirm_delete_${ct}` },
-        { text: '❌ Cancel', callback_data: `cal_cancel_${ct}` },
-      ]]
-    )
-    return
-  }
-
-  if (data.startsWith('cal_undo_')) {
-    const t = data.slice('cal_undo_'.length)
-    const row = queryOne("SELECT data FROM pending_confirmations WHERE action_id = ?", [`cal_undo_${t}`])
-    if (!row) { await send('Undo window has passed (5 min). Event not restored.'); return }
-    const payload = JSON.parse(row.data)
-    dbRun("DELETE FROM pending_confirmations WHERE action_id = ?", [`cal_undo_${t}`])
-
-    if (payload.undoType === 'create') {
-      await deleteEvent(payload.calendarUrl, payload.uid)
-      auditLog('calendar', 'undo_create', { uid: payload.uid })
-      await send('↩️ Event creation undone.')
-    } else if (payload.undoType === 'update') {
-      await updateEvent(payload.calendarUrl, payload.uid, payload.original)
-      auditLog('calendar', 'undo_update', { uid: payload.uid })
-      await send('↩️ Edit undone — event restored.')
-    }
-    return
-  }
-
-  logger.warn('calendar', 'handleCallback-unknown', data)
+  // All button-based flows have been removed. Acknowledge any stale callbacks.
+  const { answerCallbackQuery } = await import('../../core/telegram.js')
+  await answerCallbackQuery(callbackQuery.id, '')
+  await send('This action has expired.')
 }
