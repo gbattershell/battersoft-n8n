@@ -95,6 +95,7 @@ export async function run({ message } = {}) {
 
     if (!question) {
       await send('Usage: <code>$ &lt;question&gt;</code> — ask a question about your spending.\n\nExamples:\n• <code>$ how much did I spend on groceries this month?</code>\n• <code>$ am I over budget?</code>\n• <code>$ biggest expenses last week</code>')
+      await heartbeat('tiller')
       return
     }
 
@@ -104,6 +105,7 @@ export async function run({ message } = {}) {
 
     if (transactions.length === 0) {
       await send('No transactions found in your Tiller spreadsheet.')
+      auditLog('tiller', 'query', { question, result: 'no_data' })
       await heartbeat('tiller')
       return
     }
@@ -114,6 +116,7 @@ export async function run({ message } = {}) {
 
     if (filtered.length === 0) {
       await send(`No transactions found for that period (${start.toLocaleDateString('en-US')} – ${end.toLocaleDateString('en-US')}).`)
+      auditLog('tiller', 'query', { question, result: 'no_data_in_range' })
       await heartbeat('tiller')
       return
     }
