@@ -85,6 +85,18 @@ function parseReadCommand(body) {
   return null
 }
 
+function getLocalDay(evt, tz) {
+  if (evt.allDay) return evt.start.slice(0, 10)
+  return new Date(evt.start).toLocaleDateString('en-CA', { timeZone: tz })
+}
+
+function formatDayHeader(dateStr) {
+  // dateStr is 'YYYY-MM-DD' — parse as noon UTC to avoid DST edge cases
+  return new Date(dateStr + 'T12:00:00Z').toLocaleDateString('en-US', {
+    weekday: 'long', month: 'short', day: 'numeric',
+  })
+}
+
 async function runRead(start, end, calFilter) {
   const tz = getUserTimezone()
   let calendars = getCalendars()
@@ -127,16 +139,40 @@ async function runRead(start, end, calFilter) {
     return a.start.localeCompare(b.start)
   })
 
-  const dateLabel = formatDate(start, tz)
-  const lines = [`📅 <b>${dateLabel}</b>\n`]
+  const isMultiDay = start.slice(0, 10) !== end.slice(0, 10)
 
-  for (const evt of allEvents) {
-    const timeStr = evt.allDay ? '         ' : formatTime(evt.start, tz).padStart(9)
-    const label = `${evt.calEmoji ? evt.calEmoji + ' ' : ''}${esc(evt.calLabel)}`
-    lines.push(`${timeStr}  ${esc(evt.title)} · ${label}`)
+  if (!isMultiDay) {
+    // Single-day view: simple header + flat list
+    const lines = [`📅 <b>${formatDate(start, tz)}</b>\n`]
+    for (const evt of allEvents) {
+      const timeStr = evt.allDay ? '         ' : formatTime(evt.start, tz).padStart(9)
+      const label = `${evt.calEmoji ? evt.calEmoji + ' ' : ''}${esc(evt.calLabel)}`
+      lines.push(`${timeStr}  ${esc(evt.title)} · ${label}`)
+    }
+    await send(lines.join('\n'))
+    return
   }
 
-  await send(lines.join('\n'))
+  // Multi-day view: group by day
+  const byDay = new Map()
+  for (const evt of allEvents) {
+    const day = getLocalDay(evt, tz)
+    if (!byDay.has(day)) byDay.set(day, [])
+    byDay.get(day).push(evt)
+  }
+
+  const lines = []
+  for (const [day, events] of [...byDay.entries()].sort()) {
+    lines.push(`📅 <b>${formatDayHeader(day)}</b>`)
+    for (const evt of events) {
+      const timeStr = evt.allDay ? 'All day' : formatTime(evt.start, tz)
+      const label = `${evt.calEmoji ? evt.calEmoji + ' ' : ''}${esc(evt.calLabel)}`
+      lines.push(`  ${timeStr}  ${esc(evt.title)} · ${label}`)
+    }
+    lines.push('')
+  }
+
+  await send(lines.join('\n').trimEnd())
 }
 
 export async function run({ message } = {}) {
