@@ -10,6 +10,9 @@ Format: [Keep a Changelog](https://keepachangelog.com) — Added / Changed / Fix
 ## [Unreleased]
 
 ### Added
+- Tiller module: read-only Google Sheets Q&A via `$` Telegram command — Claude haiku analyzes transactions and budget data; weekly spending digest (Sunday noon) with per-category budget status, emoji warnings (⚠️ <10% remaining, 🚨 over budget), and uncategorized transaction count
+- `scripts/modules/tiller/sheets-client.js`: googleapis wrapper with separate OAuth2 consent (spreadsheets.readonly scope), dynamic header-row parsing
+- `scripts/modules/tiller/setup.js`: one-time CLI for Google Sheets OAuth consent — stores refresh token AES-256-GCM encrypted in SQLite
 - Calendar module: full CRUD for iCloud CalDAV via `cal` Telegram command — read (today/tomorrow/this week/next week/free-form), create with conflict detection (hard overlap blocks, soft 30min proximity advisory), edit via [Edit] button + natural language delta + [Undo], delete with confirmation; supports all 8 shared calendars with per-event calendar labels
 - `scripts/modules/calendar/caldav-client.js`: tsdav + ical.js wrapper with DAVClient singleton, iCalendar parsing/serialization, timezone conversion
 - `scripts/modules/calendar/parser.js`: Claude haiku NLP — natural language → structured event JSON

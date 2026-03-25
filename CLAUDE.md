@@ -14,6 +14,7 @@ Telegram polling and routing. n8n handles scheduled triggers only.
   n8n Code nodes cannot use dynamic import(); scheduled workflows call a local
   HTTP endpoint on the bot service instead of running scripts directly
 - SQLite for local state (/data/agent.db)
+- Google Sheets API (read-only) for Tiller budget queries
 - Docker Compose — ports bound to 127.0.0.1 only
 
 ## Coding Standards
