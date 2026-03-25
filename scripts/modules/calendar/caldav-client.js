@@ -93,6 +93,47 @@ export function localISO(date, tz) {
   return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}`
 }
 
+// Convert an ICAL.js occurrence details object to our plain event shape
+function occurrenceToEvent(details, calendarUrl, tz) {
+  const startDate = details.startDate
+  const endDate = details.endDate
+  const item = details.item
+  const summary = item.summary || '(no title)'
+  const uid = item.uid || ''
+
+  if (startDate.isDate) {
+    return {
+      uid,
+      title: summary,
+      start: startDate.toString(),  // 'YYYY-MM-DD'
+      end: endDate ? endDate.toString() : startDate.toString(),
+      duration: null,
+      allDay: true,
+      calendarUrl,
+    }
+  }
+
+  const startJs = startDate.toJSDate()
+  const endJs = endDate ? endDate.toJSDate() : new Date(startJs.getTime() + 3600_000)
+  return {
+    uid,
+    title: summary,
+    start: localISO(startJs, tz),
+    end: localISO(endJs, tz),
+    duration: Math.round((endJs - startJs) / 60_000),
+    allDay: false,
+    calendarUrl,
+  }
+}
+
+// Check whether a parsed event falls within [start, end] (local ISO strings)
+function evtInRange(evt, start, end) {
+  if (evt.allDay) {
+    return evt.start >= start.slice(0, 10) && evt.start <= end.slice(0, 10)
+  }
+  return evt.start >= start && evt.start <= end
+}
+
 export async function getEvents(calendarUrl, start, end) {
   const client = await getClient()
   const tz = getUserTimezone()
@@ -100,6 +141,7 @@ export async function getEvents(calendarUrl, start, end) {
   // Convert local start/end to UTC for the CalDAV time-range query
   const startUtc = new Date(localToUtc(start, tz)).toISOString()
   const endUtc = new Date(localToUtc(end, tz)).toISOString()
+  const endMs = new Date(endUtc).getTime()
 
   const objects = await client.fetchCalendarObjects({
     calendar: { url: calendarUrl },
@@ -112,8 +154,44 @@ export async function getEvents(calendarUrl, start, end) {
     try {
       const jcal = ICAL.parse(obj.data)
       const comp = new ICAL.Component(jcal)
-      for (const vevent of comp.getAllSubcomponents('vevent')) {
-        events.push(parseVEvent(vevent, calendarUrl, tz))
+      const vevents = comp.getAllSubcomponents('vevent')
+
+      // Separate master VEVENT from per-occurrence overrides (RECURRENCE-ID)
+      const master = vevents.find(v => !v.getFirstPropertyValue('recurrence-id'))
+      if (!master) {
+        // No master — just filter each override by date
+        for (const vevent of vevents) {
+          const evt = parseVEvent(vevent, calendarUrl, tz)
+          if (evtInRange(evt, start, end)) events.push(evt)
+        }
+        continue
+      }
+
+      const icalEvent = new ICAL.Event(master)
+      for (const ov of vevents.filter(v => v.getFirstPropertyValue('recurrence-id'))) {
+        icalEvent.relateException(ov)
+      }
+
+      if (!icalEvent.isRecurring()) {
+        // Non-recurring: validate it's actually in range (server can be loose)
+        const evt = parseVEvent(master, calendarUrl, tz)
+        if (evtInRange(evt, start, end)) events.push(evt)
+        continue
+      }
+
+      // Expand recurring event — start iterator near the range start to skip old occurrences
+      const masterDtstart = icalEvent.startDate
+      const iterStart = masterDtstart.isDate
+        ? ICAL.Time.fromDateString(start.slice(0, 10))
+        : ICAL.Time.fromJSDate(new Date(startUtc), true)
+
+      const iter = icalEvent.iterator(iterStart)
+      let next
+      while ((next = iter.next())) {
+        if (next.toJSDate().getTime() >= endMs) break
+        const details = icalEvent.getOccurrenceDetails(next)
+        const evt = occurrenceToEvent(details, calendarUrl, tz)
+        if (evtInRange(evt, start, end)) events.push(evt)
       }
     } catch (err) {
       logger.warn('caldav-client', 'ical-parse-error', err.message)

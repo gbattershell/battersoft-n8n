@@ -116,14 +116,17 @@ async function runRead(start, end, calFilter) {
   }
 
   const allEvents = []
-  const seenUids = new Set()
+  const seen = new Set()
   const results = await Promise.all(
     calendars.map(cal => getEvents(cal.caldav_id, start, end))
   )
   for (let i = 0; i < calendars.length; i++) {
     for (const evt of results[i]) {
-      if (seenUids.has(evt.uid)) continue
-      seenUids.add(evt.uid)
+      // Dedup by uid+start: same UID across shared calendars = same event;
+      // different starts for the same UID = different recurrence instances
+      const key = `${evt.uid}:${evt.start}`
+      if (seen.has(key)) continue
+      seen.add(key)
       allEvents.push({ ...evt, calLabel: calendars[i].display_label, calEmoji: calendars[i].emoji || '' })
     }
   }
