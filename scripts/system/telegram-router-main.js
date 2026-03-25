@@ -6,6 +6,7 @@ import { startHttpServer } from './http-server.js'
 
 // Import modules to trigger registerRoute() side-effects
 import '../modules/gmail/index.js'
+import '../modules/tiller/index.js'
 
 // HTTP server for n8n scheduled triggers — must start before polling loop
 startHttpServer(3000)
