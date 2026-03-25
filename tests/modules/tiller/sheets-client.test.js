@@ -125,8 +125,16 @@ describe('sheets-client', () => {
     assert.equal(transactions[0].institution, '')
   })
 
-  it('throws if sheets_refresh_token is missing', async () => {
-    // This test would require resetting the module — skip for now,
-    // the error path is validated in integration testing
+  it('throws informative error when TILLER_SHEET_ID is not set', async () => {
+    const originalSheetId = process.env.TILLER_SHEET_ID
+    delete process.env.TILLER_SHEET_ID
+    try {
+      await assert.rejects(
+        () => fetchSheetData(),
+        { message: 'TILLER_SHEET_ID not set — add it to .env' }
+      )
+    } finally {
+      process.env.TILLER_SHEET_ID = originalSheetId
+    }
   })
 })

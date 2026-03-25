@@ -5,8 +5,6 @@ import { google } from 'googleapis'
 import { getSecret, setSecret } from '../../core/db.js'
 import { logger } from '../../core/logger.js'
 
-const SHEET_ID = process.env.TILLER_SHEET_ID
-
 function getOAuth2Client() {
   const client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
@@ -35,6 +33,7 @@ function getSheetsApi() {
  * Returns { transactions: Transaction[], categories: Category[] }
  */
 export async function fetchSheetData() {
+  const SHEET_ID = process.env.TILLER_SHEET_ID
   if (!SHEET_ID) {
     throw new Error('TILLER_SHEET_ID not set — add it to .env')
   }
