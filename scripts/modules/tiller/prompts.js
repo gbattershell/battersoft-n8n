@@ -6,7 +6,7 @@ function formatTransactionsCSV(transactions) {
   if (transactions.length === 0) return '(no transactions in this period)'
   const header = 'Date | Description | Category | Amount | Account'
   const rows = transactions.map(t =>
-    `${t.date.toLocaleDateString('en-US')} | ${t.description} | ${t.category || '(uncategorized)'} | $${t.amount.toFixed(2)} | ${t.account}`
+    `${t.date instanceof Date ? t.date.toLocaleDateString('en-US') : 'N/A'} | ${t.description} | ${t.category || '(uncategorized)'} | $${t.amount.toFixed(2)} | ${t.account}`
   )
   return [header, ...rows].join('\n')
 }
@@ -25,7 +25,7 @@ function formatCategoryBudgets(monthByCategory, budgets) {
 export function buildQueryPrompt({ question, transactions, categories, today }) {
   const txnData = formatTransactionsCSV(transactions)
   const monthByCategory = transactions.reduce((acc, t) => {
-    acc[t.category] = (acc[t.category] ?? 0) + t.amount
+    acc[t.category || '(uncategorized)'] = (acc[t.category || '(uncategorized)'] ?? 0) + t.amount
     return acc
   }, {})
   const budgetData = formatCategoryBudgets(monthByCategory, categories)
@@ -61,7 +61,7 @@ export function buildWeeklyDigestPrompt({ weekTransactions, monthByCategory, bud
     .map(c => {
       const spent = Math.abs(monthByCategory[c.name] ?? 0)
       const remaining = c.budget - spent
-      const pctRemaining = c.budget > 0 ? remaining / c.budget : 1
+      const pctRemaining = c.budget > 0 ? (remaining / c.budget * 100).toFixed(1) : '100.0'
       return `${c.name} | $${spent.toFixed(2)} | $${c.budget.toFixed(2)} | $${remaining.toFixed(2)} | ${pctRemaining}`
     })
     .join('\n')
@@ -77,14 +77,14 @@ Total spent this week: <b>$${weekTotal.toFixed(2)}</b>
 Then a table of ALL budgeted categories with columns: Category, Spent, Budget, Remaining.
 Add emoji after each row:
 - 🚨 if the category is OVER budget (remaining is negative)
-- ⚠️ if less than 10% of budget remaining
+- ⚠️ if less than 10.0% of budget remaining (PctRemaining < 10.0)
 - No emoji if healthy
 
-Category data (Category | Spent | Budget | Remaining | PctRemaining):
+Category data (Category | Spent | Budget | Remaining | PctRemaining%):
 ${categoryLines || '(no budgeted categories)'}
 
 After the table, add:
-⚠️ = &lt;10% remaining · 🚨 = over budget
+⚠️ = &lt;10.0% remaining · 🚨 = over budget
 
 📋 <b>Uncategorized:</b> ${uncategorizedCount} transactions need review
 

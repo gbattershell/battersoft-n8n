@@ -44,6 +44,10 @@ export async function fetchSheetData() {
     ranges: ['Transactions!A:R', 'Categories!A:D'],
   })
 
+  if (!res.data.valueRanges || res.data.valueRanges.length < 2) {
+    throw new Error('Sheets API returned unexpected response — missing valueRanges')
+  }
+
   const [txnRange, catRange] = res.data.valueRanges
 
   // Parse transactions
