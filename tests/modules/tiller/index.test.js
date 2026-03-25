@@ -107,6 +107,14 @@ describe('tiller weeklyDigest()', () => {
     assert.equal(mockSend.mock.callCount(), 1)
     assert.equal(mockHeartbeat.mock.callCount(), 1)
   })
+
+  it('sends early message when no transactions this month', async () => {
+    mockFetchSheetData.mock.mockImplementationOnce(async () => ({ transactions: [], categories: [] }))
+    await weeklyDigest()
+    assert.equal(mockSend.mock.callCount(), 1)
+    assert.ok(mockSend.mock.calls[0].arguments[0].includes('No transactions'))
+    assert.equal(mockAsk.mock.callCount(), 0)
+  })
 })
 
 describe('tiller handleCallback()', () => {

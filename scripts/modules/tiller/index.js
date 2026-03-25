@@ -156,6 +156,12 @@ export async function weeklyDigest() {
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
     const monthTxns = transactions.filter(t => t.date >= monthStart && t.date <= now)
 
+    if (monthTxns.length === 0) {
+      await send('No transactions found for this month yet.')
+      await heartbeat('tiller')
+      return
+    }
+
     // This week transactions (Sunday–Saturday)
     const dayOfWeek = now.getDay()
     const weekStart = new Date(now)
