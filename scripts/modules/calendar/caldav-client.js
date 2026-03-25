@@ -159,10 +159,9 @@ export async function getEvents(calendarUrl, start, end) {
       // Separate master VEVENT from per-occurrence overrides (RECURRENCE-ID)
       const master = vevents.find(v => !v.getFirstPropertyValue('recurrence-id'))
       if (!master) {
-        // No master — just filter each override by date
+        // No master — just include all overrides (server already filtered by range)
         for (const vevent of vevents) {
-          const evt = parseVEvent(vevent, calendarUrl, tz)
-          if (evtInRange(evt, start, end)) events.push(evt)
+          events.push(parseVEvent(vevent, calendarUrl, tz))
         }
         continue
       }
@@ -173,9 +172,8 @@ export async function getEvents(calendarUrl, start, end) {
       }
 
       if (!icalEvent.isRecurring()) {
-        // Non-recurring: validate it's actually in range (server can be loose)
-        const evt = parseVEvent(master, calendarUrl, tz)
-        if (evtInRange(evt, start, end)) events.push(evt)
+        // Non-recurring: trust the CalDAV server's time-range filter
+        events.push(parseVEvent(master, calendarUrl, tz))
         continue
       }
 
@@ -190,7 +188,7 @@ export async function getEvents(calendarUrl, start, end) {
         if (evtInRange(evt, start, end)) events.push(evt)
       }
     } catch (err) {
-      logger.warn('caldav-client', 'ical-parse-error', err.message)
+      logger.warn('caldav-client', 'ical-parse-error', `${err.message} — ${obj.url ?? ''}`)
     }
   }
   return events
