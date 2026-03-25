@@ -25,15 +25,17 @@ function getCalendars() {
   return query('SELECT * FROM calendar_mapping ORDER BY display_order')
 }
 
-function formatTime(isoStr, tz) {
-  return new Date(isoStr).toLocaleTimeString('en-US', {
-    timeZone: tz, hour: 'numeric', minute: '2-digit', hour12: true,
-  })
+function formatTime(isoStr) {
+  // isoStr is already local ('YYYY-MM-DDTHH:mm:ss') — read H:M directly, no re-parsing
+  const [h, m] = isoStr.slice(11, 16).split(':').map(Number)
+  const period = h < 12 ? 'AM' : 'PM'
+  return `${h % 12 || 12}:${m.toString().padStart(2, '0')} ${period}`
 }
 
-function formatDate(isoStr, tz) {
-  return new Date(isoStr).toLocaleDateString('en-US', {
-    timeZone: tz, weekday: 'short', month: 'short', day: 'numeric',
+function formatDate(isoStr) {
+  // Use noon UTC so the date never shifts across DST boundaries
+  return new Date(isoStr.slice(0, 10) + 'T12:00:00Z').toLocaleDateString('en-US', {
+    timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric',
   })
 }
 
@@ -85,15 +87,15 @@ function parseReadCommand(body) {
   return null
 }
 
-function getLocalDay(evt, tz) {
-  if (evt.allDay) return evt.start.slice(0, 10)
-  return new Date(evt.start).toLocaleDateString('en-CA', { timeZone: tz })
+function getLocalDay(evt) {
+  // evt.start is already local ISO — the date slice is correct for both allDay and timed
+  return evt.start.slice(0, 10)
 }
 
 function formatDayHeader(dateStr) {
-  // dateStr is 'YYYY-MM-DD' — parse as noon UTC to avoid DST edge cases
+  // dateStr is 'YYYY-MM-DD' — noon UTC formatted in UTC = always the correct date
   return new Date(dateStr + 'T12:00:00Z').toLocaleDateString('en-US', {
-    weekday: 'long', month: 'short', day: 'numeric',
+    timeZone: 'UTC', weekday: 'long', month: 'short', day: 'numeric',
   })
 }
 
@@ -146,9 +148,9 @@ async function runRead(start, end, calFilter) {
 
   if (!isMultiDay) {
     // Single-day view: simple header + flat list
-    const lines = [`📅 <b>${formatDate(start, tz)}</b>\n`]
+    const lines = [`📅 <b>${formatDate(start)}</b>\n`]
     for (const evt of allEvents) {
-      const timeStr = evt.allDay ? '         ' : formatTime(evt.start, tz).padStart(9)
+      const timeStr = evt.allDay ? '         ' : formatTime(evt.start).padStart(9)
       const label = `${evt.calEmoji ? evt.calEmoji + ' ' : ''}${esc(evt.calLabel)}`
       lines.push(`${timeStr}  ${esc(evt.title)} · ${label}`)
     }
@@ -159,7 +161,7 @@ async function runRead(start, end, calFilter) {
   // Multi-day view: group by day
   const byDay = new Map()
   for (const evt of allEvents) {
-    const day = getLocalDay(evt, tz)
+    const day = getLocalDay(evt)
     if (!byDay.has(day)) byDay.set(day, [])
     byDay.get(day).push(evt)
   }
@@ -168,7 +170,7 @@ async function runRead(start, end, calFilter) {
   for (const [day, events] of [...byDay.entries()].sort()) {
     lines.push(`📅 <b>${formatDayHeader(day)}</b>`)
     for (const evt of events) {
-      const timeStr = evt.allDay ? 'All day' : formatTime(evt.start, tz)
+      const timeStr = evt.allDay ? 'All day' : formatTime(evt.start)
       const label = `${evt.calEmoji ? evt.calEmoji + ' ' : ''}${esc(evt.calLabel)}`
       lines.push(`  ${timeStr}  ${esc(evt.title)} · ${label}`)
     }
