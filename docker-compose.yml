@@ -40,6 +40,7 @@ services:
       - ENCRYPTION_KEY=${ENCRYPTION_KEY}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - TILLER_SHEET_ID=${TILLER_SHEET_ID}
     volumes:
       - ./scripts:/home/node/scripts
       - ./data:/home/node/data
