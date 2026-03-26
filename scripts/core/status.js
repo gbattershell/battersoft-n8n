@@ -2,6 +2,11 @@
 import { getDb, query, queryOne } from './db.js'
 import { send } from './telegram.js'
 
+/** Escapes HTML special characters for safe inclusion in Telegram HTML messages. */
+function esc(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
 /** Records a successful run. Resets consecutive_errors and alert_sent_at. */
 export async function heartbeat(moduleName) {
   const now = Math.floor(Date.now() / 1000)
@@ -42,7 +47,7 @@ export async function error(moduleName, err) {
   if (row.consecutive_errors >= 3) {
     const withinCooldown = row.alert_sent_at && (now - row.alert_sent_at) < 86400
     if (!withinCooldown) {
-      await send('\u26a0\ufe0f ' + moduleName + ' has failed 3 times in a row.\nLast error: ' + err.message + "\nRun 'status' for details.")
+      await send('\u26a0\ufe0f ' + moduleName + ' has failed 3 times in a row.\nLast error: ' + esc(err.message) + "\nRun 'status' for details.")
       getDb().prepare(
         'UPDATE module_status SET alert_sent_at = ? WHERE module = ?'
       ).run(now, moduleName)
@@ -65,7 +70,7 @@ export async function report() {
     if (row.run_count === 0) {
       icon = '⬜'; detail = 'never run'
     } else if (row.consecutive_errors > 0) {
-      icon = '❌'; detail = `FAILED ${age(now - row.last_run)} ago — ${truncate(row.last_error ?? '', 80)}`
+      icon = '❌'; detail = `FAILED ${age(now - row.last_run)} ago — ${esc(truncate(row.last_error ?? '', 80))}`
     } else if (row.error_count > 0) {
       icon = '⚠️'; detail = 'last run ' + age(now - row.last_run) + ' ago · ' + row.run_count + ' runs · ' + row.error_count + ' errors'
     } else {
