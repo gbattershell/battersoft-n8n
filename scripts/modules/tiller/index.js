@@ -122,7 +122,7 @@ export async function run({ message } = {}) {
     }
 
     // Check if this is a budget-specific query
-    const isBudgetQuery = /budget|over budget|under budget|on track/i.test(question)
+    const isBudgetQuery = /budget|on track/i.test(question)
     const monthByCategory = aggregateByCategory(filtered)
 
     let prompt
