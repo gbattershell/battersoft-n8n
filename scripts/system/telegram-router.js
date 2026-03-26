@@ -36,7 +36,8 @@ export async function handleUpdate(update) {
       const mod = await import('../modules/calendar/index.js')
       await mod.run({ message })
     } else if (text.startsWith('$')) {
-      // Phase 3: tiller
+      const mod = await import('../modules/tiller/index.js')
+      await mod.run({ message })
     } else if (text.startsWith('gh')) {
       // Phase 5: github
     } else if (text.startsWith('news')) {
